@@ -1,0 +1,30 @@
+name = "kimunyc"
+main = "worker/index.ts"
+compatibility_date = "2024-12-01"
+
+# Enable Node.js compatibility for some APIs
+compatibility_flags = ["nodejs_compat"]
+
+# Durable Objects bindings
+[[durable_objects.bindings]]
+name = "GAME_SERVER"
+class_name = "GameServer"
+
+# Migrations for Durable Objects (free plan requires new_sqlite_classes)
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameServer"]
+
+# Static assets for the frontend (served from dist/)
+[assets]
+directory = "./dist"
+
+# Environment variables
+[vars]
+ENVIRONMENT = "production"
+
+# Development settings
+[dev]
+port = 8787
+local_protocol = "http"
+
