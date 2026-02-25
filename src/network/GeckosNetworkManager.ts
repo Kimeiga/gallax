@@ -53,12 +53,12 @@ export class GeckosNetworkManager {
     if (serverUrl) {
       this.serverUrl = serverUrl;
     } else {
-      // Production: Cloudflare Tunnel for HTTPS signaling
+      // Production: Use game.kimu.nyc with proper SSL
       const isProduction = window.location.hostname !== 'localhost' &&
                            window.location.hostname !== '127.0.0.1';
       if (isProduction) {
-        // Use Cloudflare Tunnel for HTTPS (signaling only, WebRTC uses direct UDP)
-        this.serverUrl = 'https://grip-attendance-programs-gourmet.trycloudflare.com';
+        // Custom domain with Let's Encrypt SSL via Caddy
+        this.serverUrl = 'https://game.kimu.nyc';
       } else {
         this.serverUrl = 'http://localhost:3000';
       }
