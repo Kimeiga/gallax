@@ -344,15 +344,15 @@ html, body {
 
 @media (max-width: 768px) {
   #name-input-container {
-    top: auto;
-    bottom: 180px;
+    top: 10px;
+    bottom: auto;
     right: 10px;
-    left: 10px;
-    flex-direction: column;
+    left: auto;
+    flex-direction: row;
   }
 
   #player-name-input {
-    width: 100%;
+    width: 140px;
   }
 }
 
@@ -465,10 +465,22 @@ html, body {
 @media (max-width: 768px) {
   #chat-container {
     width: calc(100% - 20px);
-    bottom: 60px;
+    bottom: 10px;
   }
 
   #chat-messages {
-    height: 100px;
+    height: 80px;
+  }
+}
+
+/* Touch devices (mobile with joystick) */
+@media (pointer: coarse) {
+  #chat-container {
+    bottom: 200px;
+    width: calc(100% - 20px);
+  }
+
+  #chat-messages {
+    height: 80px;
   }
 }
