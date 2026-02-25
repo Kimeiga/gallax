@@ -244,6 +244,22 @@ io.onConnection((channel: ServerChannel) => {
     }
   });
 
+  // Handle chat message (reliable)
+  channel.on('chat', (data: Data) => {
+    const msg = data as { message: string };
+    const player = players.get(playerId);
+    if (player && msg.message && msg.message.trim()) {
+      const chatMessage = {
+        playerId,
+        playerName: player.name,
+        message: msg.message.trim().slice(0, 200), // Limit message length
+        timestamp: Date.now(),
+      };
+      io.emit('chat_message', chatMessage, { reliable: true });
+      console.log(`💬 ${player.name}: ${chatMessage.message}`);
+    }
+  });
+
   // Handle disconnect
   channel.onDisconnect(() => {
     players.delete(playerId);

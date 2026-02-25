@@ -26,6 +26,13 @@ export interface NetworkBuilding {
   placedAt: number;
 }
 
+export interface ChatMessage {
+  playerId: string;
+  playerName: string;
+  message: string;
+  timestamp: number;
+}
+
 export type MessageHandler = {
   onInit: (playerId: string, players: NetworkPlayer[], collectedResources: string[], buildings: NetworkBuilding[]) => void;
   onPlayerJoined: (player: NetworkPlayer) => void;
@@ -34,6 +41,7 @@ export type MessageHandler = {
   onPlayerNameChanged: (playerId: string, name: string) => void;
   onResourceCollected: (resourceId: string, playerId: string) => void;
   onBuildingPlaced: (building: NetworkBuilding) => void;
+  onChatMessage?: (message: ChatMessage) => void;
   onSnapshot?: (snapshot: unknown) => void;
 };
 
@@ -182,6 +190,14 @@ export class GeckosNetworkManager {
       this.handlers!.onBuildingPlaced(msg.building);
     });
 
+    // Chat messages
+    this.channel.on('chat_message', (data: Data) => {
+      const msg = data as ChatMessage;
+      if (this.handlers!.onChatMessage) {
+        this.handlers!.onChatMessage(msg);
+      }
+    });
+
     // Snapshot interpolation for smooth movement
     this.channel.on('snapshot', (data: Data) => {
       const snapshot = data as unknown;
@@ -231,6 +247,10 @@ export class GeckosNetworkManager {
 
   setName(name: string) {
     this.channel?.emit('set_name', { name }, { reliable: true });
+  }
+
+  sendChat(message: string) {
+    this.channel?.emit('chat', { message }, { reliable: true });
   }
 
   getPlayerId(): string | null {

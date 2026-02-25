@@ -7,7 +7,7 @@ import { NPCManager } from './NPCManager';
 import { WaterEntityManager } from './WaterEntityManager';
 import { TerrainEntityManager } from './TerrainEntityManager';
 import { Inventory, EMOJI_TO_RESOURCE, RESOURCE_INFO } from './Inventory';
-import { GeckosNetworkManager as NetworkManager, NetworkPlayer, NetworkBuilding } from '../network/GeckosNetworkManager';
+import { GeckosNetworkManager as NetworkManager, ChatMessage } from '../network/GeckosNetworkManager';
 import { OtherPlayersManager } from './OtherPlayersManager';
 import { BuildingManager, BUILDING_DEFS } from './BuildingManager';
 import { CraftingSystem } from './Crafting';
@@ -40,6 +40,10 @@ export class Game {
   private playerName: string = '';
   private performanceManager: PerformanceManager;
   private entitiesVisible: boolean = true;
+
+  // Chat
+  private chatMessages: ChatMessage[] = [];
+  private maxChatMessages = 50;
 
   constructor(mapManager: MapManager) {
     this.mapManager = mapManager;
@@ -172,6 +176,9 @@ export class Game {
 
     // Setup name input UI
     this.createNameInputUI();
+
+    // Setup chat UI
+    this.createChatUI();
 
     // Handle window resize
     window.addEventListener('resize', () => {
@@ -748,6 +755,9 @@ export class Game {
           console.log(`🏠 Building ${building.type} placed by ${building.ownerId}`);
           this.buildingManager?.addBuilding(building);
         },
+        onChatMessage: (message) => {
+          this.addChatMessage(message);
+        },
       });
 
       // Send join message - server will assign a unique name
@@ -791,6 +801,87 @@ export class Game {
     input.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') setName();
     });
+  }
+
+  // Create chat UI
+  private createChatUI(): void {
+    const chatContainer = document.createElement('div');
+    chatContainer.id = 'chat-container';
+    chatContainer.innerHTML = `
+      <div id="chat-messages"></div>
+      <div id="chat-input-row">
+        <input type="text" id="chat-input" placeholder="Press Enter to chat..." maxlength="200">
+        <button id="chat-send-btn">Send</button>
+      </div>
+    `;
+    document.body.appendChild(chatContainer);
+
+    const input = document.getElementById('chat-input') as HTMLInputElement;
+    const btn = document.getElementById('chat-send-btn') as HTMLButtonElement;
+
+    const sendMessage = () => {
+      const message = input.value.trim();
+      if (message) {
+        this.network.sendChat(message);
+        input.value = '';
+      }
+    };
+
+    btn.addEventListener('click', sendMessage);
+    input.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    // Focus chat input when pressing Enter (if not already focused)
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && document.activeElement !== input) {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  }
+
+  // Add a chat message to the UI
+  private addChatMessage(message: ChatMessage): void {
+    this.chatMessages.push(message);
+
+    // Trim old messages
+    while (this.chatMessages.length > this.maxChatMessages) {
+      this.chatMessages.shift();
+    }
+
+    this.updateChatUI();
+  }
+
+  // Update chat messages display
+  private updateChatUI(): void {
+    const messagesContainer = document.getElementById('chat-messages');
+    if (!messagesContainer) return;
+
+    const myPlayerId = this.network.getPlayerId();
+
+    messagesContainer.innerHTML = this.chatMessages.map(msg => {
+      const isMe = msg.playerId === myPlayerId;
+      const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return `<div class="chat-message ${isMe ? 'my-message' : ''}">
+        <span class="chat-time">${time}</span>
+        <span class="chat-name">${msg.playerName}:</span>
+        <span class="chat-text">${this.escapeHtml(msg.message)}</span>
+      </div>`;
+    }).join('');
+
+    // Scroll to bottom
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  }
+
+  // Escape HTML to prevent XSS
+  private escapeHtml(text: string): string {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
 
   // Create crafting UI
