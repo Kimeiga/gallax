@@ -41,6 +41,10 @@ export class Game {
   private performanceManager: PerformanceManager;
   private entitiesVisible: boolean = true;
 
+  // Client-side prediction tracking
+  private currentInput = { x: 0, y: 0 };
+  private currentDeltaTime = 0;
+
   // Chat
   private chatMessages: ChatMessage[] = [];
   private maxChatMessages = 50;
@@ -284,10 +288,14 @@ export class Game {
 
     // Update player (always runs)
     if (this.player) {
+      // Track current input for client-side prediction
+      this.currentInput = { x: input.x, y: input.y };
+      this.currentDeltaTime = deltaTime;
+
       this.player.setVelocity(input.x, input.y);
       this.player.update(deltaTime);
 
-      // Send position updates to server (throttled)
+      // Send position updates to server (throttled) with input data for prediction
       this.sendPositionUpdate();
     }
 
@@ -333,7 +341,7 @@ export class Game {
     console.log(`📊 Entities ${shouldShow ? 'shown' : 'hidden'} (zoom: ${this.mapManager.getZoom().toFixed(1)})`);
   }
 
-  // Send position update to server (throttled)
+  // Send position update to server (throttled) with input data for client-side prediction
   private sendPositionUpdate(): void {
     if (!this.player || !this.network.isConnected()) return;
 
@@ -348,7 +356,14 @@ export class Game {
     const moved = Math.sqrt(dx * dx + dy * dy) > 0.000001;
 
     if (moved) {
-      this.network.move(pos.lng, pos.lat);
+      // Include input data for client-side prediction tracking
+      this.network.move(
+        pos.lng,
+        pos.lat,
+        this.currentInput.x,
+        this.currentInput.y,
+        this.currentDeltaTime
+      );
       this.lastPositionSent = { lng: pos.lng, lat: pos.lat };
       this.lastPositionSendTime = now;
     }
@@ -757,6 +772,20 @@ export class Game {
         },
         onChatMessage: (message) => {
           this.addChatMessage(message);
+        },
+        onPositionCorrection: (lng, lat, inputsToReapply) => {
+          // Server position differs from our prediction - reconcile
+          if (this.player) {
+            // Snap to server position
+            this.player.setPosition(lng, lat);
+
+            // Re-apply all unprocessed inputs to get back to current state
+            for (const input of inputsToReapply) {
+              this.player.applyInput(input.inputX, input.inputY, input.deltaTime);
+            }
+
+            console.log(`🔄 Reconciled: snapped to server, re-applied ${inputsToReapply.length} inputs`);
+          }
         },
       });
 

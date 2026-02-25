@@ -33,6 +33,20 @@ export interface ChatMessage {
   timestamp: number;
 }
 
+// Input record for client-side prediction
+interface InputRecord {
+  seq: number;           // Sequence number
+  timestamp: number;     // When input was applied
+  inputX: number;        // Input direction X
+  inputY: number;        // Input direction Y
+  deltaTime: number;     // Delta time when applied
+  predictedLng: number;  // Predicted position after applying
+  predictedLat: number;
+}
+
+// Position correction callback type
+export type PositionCorrectionCallback = (lng: number, lat: number, inputsToReapply: InputRecord[]) => void;
+
 export type MessageHandler = {
   onInit: (playerId: string, players: NetworkPlayer[], collectedResources: string[], buildings: NetworkBuilding[]) => void;
   onPlayerJoined: (player: NetworkPlayer) => void;
@@ -43,9 +57,12 @@ export type MessageHandler = {
   onBuildingPlaced: (building: NetworkBuilding) => void;
   onChatMessage?: (message: ChatMessage) => void;
   onSnapshot?: (snapshot: unknown) => void;
+  onPositionCorrection?: PositionCorrectionCallback;
 };
 
 const SNAPSHOT_RATE = 15;
+const INPUT_BUFFER_SIZE = 128; // Keep last N inputs for reconciliation
+const POSITION_TOLERANCE = 0.000005; // ~0.5 meters - threshold for correction
 
 export class GeckosNetworkManager {
   private channel: ClientChannel | null = null;
@@ -54,6 +71,12 @@ export class GeckosNetworkManager {
   private serverUrl: string;
   private SI: SnapshotInterpolation;
   private connected = false;
+
+  // Client-side prediction state
+  private inputSequence = 0;
+  private inputBuffer: InputRecord[] = [];
+  private lastAcknowledgedSeq = -1;
+  private serverPosition: { lng: number; lat: number } | null = null;
 
   constructor(serverUrl?: string) {
     this.SI = new SnapshotInterpolation(SNAPSHOT_RATE);
@@ -198,6 +221,12 @@ export class GeckosNetworkManager {
       }
     });
 
+    // Position acknowledgment for client-side prediction reconciliation
+    this.channel.on('position_ack', (data: Data) => {
+      const msg = data as { lng: number; lat: number; seq: number };
+      this.handlePositionAck(msg.lng, msg.lat, msg.seq);
+    });
+
     // Snapshot interpolation for smooth movement
     this.channel.on('snapshot', (data: Data) => {
       const snapshot = data as unknown;
@@ -233,8 +262,66 @@ export class GeckosNetworkManager {
     this.channel?.emit('join', { lng, lat, spriteNum, name }, { reliable: true });
   }
 
-  move(lng: number, lat: number) {
-    this.channel?.emit('move', { lng, lat }, { reliable: false });
+  // Record input and send move with sequence number for prediction
+  move(lng: number, lat: number, inputX: number, inputY: number, deltaTime: number) {
+    const seq = this.inputSequence++;
+
+    // Record input for potential reconciliation
+    const inputRecord: InputRecord = {
+      seq,
+      timestamp: Date.now(),
+      inputX,
+      inputY,
+      deltaTime,
+      predictedLng: lng,
+      predictedLat: lat,
+    };
+
+    // Add to buffer, remove old entries
+    this.inputBuffer.push(inputRecord);
+    if (this.inputBuffer.length > INPUT_BUFFER_SIZE) {
+      this.inputBuffer.shift();
+    }
+
+    // Send to server with sequence number
+    this.channel?.emit('move', { lng, lat, seq }, { reliable: false });
+  }
+
+  // Handle server position acknowledgment and perform reconciliation
+  handlePositionAck(serverLng: number, serverLat: number, lastProcessedSeq: number) {
+    this.serverPosition = { lng: serverLng, lat: serverLat };
+
+    // Find the acknowledged input in our buffer
+    const ackIndex = this.inputBuffer.findIndex(input => input.seq === lastProcessedSeq);
+
+    if (ackIndex === -1) {
+      // Server is acknowledging a sequence we already cleared - just update position
+      this.lastAcknowledgedSeq = lastProcessedSeq;
+      return;
+    }
+
+    // Get our predicted position at the time of the acknowledged input
+    const ackedInput = this.inputBuffer[ackIndex];
+
+    // Calculate position difference
+    const dx = Math.abs(serverLng - ackedInput.predictedLng);
+    const dy = Math.abs(serverLat - ackedInput.predictedLat);
+    const positionDiff = Math.sqrt(dx * dx + dy * dy);
+
+    // Remove all inputs up to and including the acknowledged one
+    const inputsToReapply = this.inputBuffer.slice(ackIndex + 1);
+    this.inputBuffer = inputsToReapply;
+    this.lastAcknowledgedSeq = lastProcessedSeq;
+
+    // If position differs beyond tolerance, we need to reconcile
+    if (positionDiff > POSITION_TOLERANCE) {
+      console.log(`🔄 Reconciling: diff=${positionDiff.toFixed(8)}, reapply=${inputsToReapply.length} inputs`);
+
+      // Notify Game.ts to correct position and re-apply inputs
+      if (this.handlers?.onPositionCorrection) {
+        this.handlers.onPositionCorrection(serverLng, serverLat, inputsToReapply);
+      }
+    }
   }
 
   collectResource(resourceId: string) {

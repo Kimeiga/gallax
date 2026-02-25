@@ -25,9 +25,11 @@ const players = new Map<string, Player>();
 const collectedResources = new Map<string, number>(); // resourceId -> timestamp
 const buildings = new Map<string, Building>();
 const channels = new Map<string, ServerChannel>();
+const lastProcessedSeq = new Map<string, number>(); // playerId -> last sequence number
 
 const RESOURCE_RESPAWN_TIME = 5 * 60 * 1000; // 5 minutes
 const SNAPSHOT_RATE = 15; // 15 snapshots per second (~66ms)
+const POSITION_ACK_RATE = 10; // Send position acks 10 times per second
 const isProduction = process.env.NODE_ENV === 'production';
 
 // Snapshot interpolation
@@ -164,6 +166,23 @@ setInterval(() => {
   }
 }, 1000 / SNAPSHOT_RATE);
 
+// Send position acknowledgments to each player for reconciliation
+setInterval(() => {
+  for (const [playerId, channel] of channels.entries()) {
+    const player = players.get(playerId);
+    const seq = lastProcessedSeq.get(playerId);
+
+    // Only send if we have a player and a sequence number
+    if (player && typeof seq === 'number') {
+      channel.emit('position_ack', {
+        lng: player.lng,
+        lat: player.lat,
+        seq: seq,
+      }, { reliable: false });
+    }
+  }
+}, 1000 / POSITION_ACK_RATE);
+
 io.onConnection((channel: ServerChannel) => {
   const playerId = channel.id || generateId();
   channels.set(playerId, channel);
@@ -199,13 +218,18 @@ io.onConnection((channel: ServerChannel) => {
     console.log(`🎮 ${player.name} joined (${players.size} players)`);
   });
 
-  // Handle movement (unreliable for speed)
+  // Handle movement with sequence tracking for client-side prediction
   channel.on('move', (data: Data) => {
-    const msg = data as { lng: number; lat: number };
+    const msg = data as { lng: number; lat: number; seq?: number };
     const player = players.get(playerId);
     if (player) {
       player.lng = msg.lng;
       player.lat = msg.lat;
+
+      // Track the last processed sequence number for this player
+      if (typeof msg.seq === 'number') {
+        lastProcessedSeq.set(playerId, msg.seq);
+      }
     }
   });
 
@@ -264,6 +288,7 @@ io.onConnection((channel: ServerChannel) => {
   channel.onDisconnect(() => {
     players.delete(playerId);
     channels.delete(playerId);
+    lastProcessedSeq.delete(playerId); // Clean up sequence tracking
     io.emit('player_left', { playerId }, { reliable: true });
     console.log(`👋 Player ${playerId} left (${channels.size} remaining)`);
   });

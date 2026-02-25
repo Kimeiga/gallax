@@ -93,6 +93,24 @@ export class Player {
     return this.playerName;
   }
 
+  // For server reconciliation - directly set position
+  setPosition(lng: number, lat: number): void {
+    this.lng = lng;
+    this.lat = lat;
+    this.updatePosition();
+  }
+
+  // Apply a single input movement (for re-applying after server correction)
+  applyInput(inputX: number, inputY: number, deltaTime: number): void {
+    // Note: negative y = north (higher latitude)
+    this.lng += inputX * this.moveSpeed * deltaTime;
+    this.lat -= inputY * this.moveSpeed * deltaTime;
+  }
+
+  getMoveSpeed(): number {
+    return this.moveSpeed;
+  }
+
   setVelocity(x: number, y: number): void {
     this.velocity.x = x;
     this.velocity.y = y;
