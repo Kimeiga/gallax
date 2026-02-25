@@ -53,6 +53,8 @@ export class Game {
   private selectedBuildingId: string | null = null;
   private rotationHandleEl: HTMLElement | null = null;
   private moveHandleEl: HTMLElement | null = null;
+  private rotationLineEl: HTMLElement | null = null;
+  private buildingGlowEl: HTMLElement | null = null;
   private isRotating = false;
   private isMovingBuilding = false;
   private rotationStartAngle = 0;
@@ -588,7 +590,39 @@ export class Game {
     const building = this.buildingManager.getBuildings().get(this.selectedBuildingId);
     if (!building) return;
 
-    // Create handle element
+    // Create blue glow around building
+    const glow = document.createElement('div');
+    glow.id = 'building-glow';
+    glow.style.cssText = `
+      position: fixed;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: transparent;
+      border: 3px solid rgba(66, 165, 245, 0.8);
+      box-shadow: 0 0 15px rgba(66, 165, 245, 0.6), inset 0 0 10px rgba(66, 165, 245, 0.3);
+      z-index: 999;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    `;
+    document.body.appendChild(glow);
+    this.buildingGlowEl = glow;
+
+    // Create line from center to rotation handle
+    const line = document.createElement('div');
+    line.id = 'rotation-line';
+    line.style.cssText = `
+      position: fixed;
+      height: 2px;
+      background: rgba(255, 255, 255, 0.8);
+      transform-origin: left center;
+      z-index: 999;
+      pointer-events: none;
+    `;
+    document.body.appendChild(line);
+    this.rotationLineEl = line;
+
+    // Create rotation handle element (white circle)
     const handle = document.createElement('div');
     handle.id = 'rotation-handle';
     handle.style.cssText = `
@@ -602,12 +636,17 @@ export class Game {
       z-index: 1000;
       transform: translate(-50%, -50%);
       box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
     `;
+    handle.textContent = '🔄';
 
     document.body.appendChild(handle);
     this.rotationHandleEl = handle;
 
-    // Position the handle
+    // Position all elements
     this.updateRotationHandlePosition();
 
     // Add drag handlers
@@ -688,7 +727,7 @@ export class Game {
     this.createMoveHandle();
   }
 
-  // Create the move handle UI (cross icon below the building)
+  // Create the move handle UI (at center of building for dragging)
   private createMoveHandle(): void {
     this.removeMoveHandle();
 
@@ -697,26 +736,26 @@ export class Game {
     const building = this.buildingManager.getBuildings().get(this.selectedBuildingId);
     if (!building) return;
 
-    // Create move handle element
+    // Create move handle element (centered on building)
     const moveHandle = document.createElement('div');
     moveHandle.id = 'move-handle';
     moveHandle.style.cssText = `
       position: fixed;
-      width: 28px;
-      height: 28px;
+      width: 36px;
+      height: 36px;
       border-radius: 50%;
-      background: #4CAF50;
+      background: rgba(66, 165, 245, 0.9);
       border: 2px solid white;
       cursor: move;
-      z-index: 1000;
+      z-index: 1001;
       transform: translate(-50%, -50%);
-      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 16px;
+      font-size: 18px;
     `;
-    moveHandle.textContent = '↔';
+    moveHandle.textContent = '✥';
 
     document.body.appendChild(moveHandle);
     this.moveHandleEl = moveHandle;
@@ -806,24 +845,11 @@ export class Game {
     const building = this.buildingManager.getBuildings().get(this.selectedBuildingId);
     if (!building) return;
 
-    // Get building screen position
+    // Get building screen position - move handle is at center
     const screenPos = this.mapManager.project({ lng: building.lng, lat: building.lat });
 
-    // Calculate handle position below the building (rotated)
-    const zoom = this.mapManager.getZoom();
-    const scale = Math.pow(2, zoom - 16) * 1.5;
-    const handleDistance = 40 * scale;
-
-    // Account for map bearing when positioning handles
-    const mapBearing = this.mapManager.getBearing() * (Math.PI / 180);
-
-    // Handle is below the building, rotated by building rotation minus map bearing
-    const handleAngle = building.rotation - mapBearing + Math.PI / 2; // Start at bottom
-    const handleX = screenPos.x + Math.cos(handleAngle) * handleDistance;
-    const handleY = screenPos.y + Math.sin(handleAngle) * handleDistance;
-
-    this.moveHandleEl.style.left = `${handleX}px`;
-    this.moveHandleEl.style.top = `${handleY}px`;
+    this.moveHandleEl.style.left = `${screenPos.x}px`;
+    this.moveHandleEl.style.top = `${screenPos.y}px`;
   }
 
   // Remove the move handle
@@ -847,7 +873,7 @@ export class Game {
     // Calculate handle position above the building (rotated)
     const zoom = this.mapManager.getZoom();
     const scale = Math.pow(2, zoom - 16) * 1.5;
-    const handleDistance = 40 * scale; // Distance from center to handle
+    const handleDistance = 50 * scale; // Distance from center to rotation handle
 
     // Account for map bearing when positioning handles
     const mapBearing = this.mapManager.getBearing() * (Math.PI / 180);
@@ -859,13 +885,42 @@ export class Game {
 
     this.rotationHandleEl.style.left = `${handleX}px`;
     this.rotationHandleEl.style.top = `${handleY}px`;
+
+    // Update glow position (centered on building)
+    if (this.buildingGlowEl) {
+      const glowSize = 60 * scale;
+      this.buildingGlowEl.style.width = `${glowSize}px`;
+      this.buildingGlowEl.style.height = `${glowSize}px`;
+      this.buildingGlowEl.style.left = `${screenPos.x}px`;
+      this.buildingGlowEl.style.top = `${screenPos.y}px`;
+    }
+
+    // Update line from center to rotation handle
+    if (this.rotationLineEl) {
+      const lineLength = Math.sqrt(
+        Math.pow(handleX - screenPos.x, 2) + Math.pow(handleY - screenPos.y, 2)
+      );
+      const lineAngle = Math.atan2(handleY - screenPos.y, handleX - screenPos.x) * (180 / Math.PI);
+      this.rotationLineEl.style.left = `${screenPos.x}px`;
+      this.rotationLineEl.style.top = `${screenPos.y}px`;
+      this.rotationLineEl.style.width = `${lineLength}px`;
+      this.rotationLineEl.style.transform = `rotate(${lineAngle}deg)`;
+    }
   }
 
-  // Remove the rotation handle
+  // Remove the rotation handle and related UI elements
   private removeRotationHandle(): void {
     if (this.rotationHandleEl) {
       this.rotationHandleEl.remove();
       this.rotationHandleEl = null;
+    }
+    if (this.rotationLineEl) {
+      this.rotationLineEl.remove();
+      this.rotationLineEl = null;
+    }
+    if (this.buildingGlowEl) {
+      this.buildingGlowEl.remove();
+      this.buildingGlowEl = null;
     }
     this.removeMoveHandle();
   }
