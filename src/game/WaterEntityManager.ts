@@ -1,6 +1,7 @@
 import { Application, Text, TextStyle } from 'pixi.js';
 import type { MapboxGeoJSONFeature } from 'mapbox-gl';
 import { MapManager } from '../map/MapManager';
+import { getPerformanceManager } from './PerformanceManager';
 
 // Water creature and vehicle emojis
 const FISH_EMOJIS = ['🐟', '🐠', '🐡', '🦈', '🐳', '🐋', '🐬', '🦭', '🦑', '🐙', '🦞', '🦀', '🦐'];
@@ -71,6 +72,11 @@ export class WaterEntityManager {
   }
 
   spawnEntitiesInView(): void {
+    const performanceManager = getPerformanceManager();
+
+    // Check if we've hit entity limit
+    if (!performanceManager.canSpawnWaterEntity(this.entities.size)) return;
+
     const map = this.mapManager.getMap();
     const bounds = map.getBounds();
     if (!bounds) return;
@@ -81,6 +87,9 @@ export class WaterEntityManager {
 
     for (let lng = Math.floor(sw.lng / cellSize) * cellSize; lng < ne.lng; lng += cellSize) {
       for (let lat = Math.floor(sw.lat / cellSize) * cellSize; lat < ne.lat; lat += cellSize) {
+        // Check limit again during spawning
+        if (!performanceManager.canSpawnWaterEntity(this.entities.size)) return;
+
         const cellId = `water-${lng.toFixed(4)},${lat.toFixed(4)}`;
 
         if (this.spawnedAreas.has(cellId)) continue;
@@ -90,6 +99,8 @@ export class WaterEntityManager {
         const rng = new SeededRandom(seed);
 
         for (let i = 0; i < this.ENTITIES_PER_AREA; i++) {
+          if (!performanceManager.canSpawnWaterEntity(this.entities.size)) break;
+
           const entityLng = rng.range(lng, lng + cellSize);
           const entityLat = rng.range(lat, lat + cellSize);
 
@@ -239,5 +250,17 @@ export class WaterEntityManager {
       entity.text.destroy();
       this.entities.delete(id);
     }
+  }
+
+  // Toggle visibility of all entities (performance optimization)
+  setVisible(visible: boolean): void {
+    for (const entity of this.entities.values()) {
+      entity.text.visible = visible;
+    }
+  }
+
+  // Get current entity count
+  getCount(): number {
+    return this.entities.size;
   }
 }

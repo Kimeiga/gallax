@@ -7,10 +7,11 @@ import { NPCManager } from './NPCManager';
 import { WaterEntityManager } from './WaterEntityManager';
 import { TerrainEntityManager } from './TerrainEntityManager';
 import { Inventory, EMOJI_TO_RESOURCE, RESOURCE_INFO } from './Inventory';
-import { NetworkManager, NetworkPlayer, NetworkBuilding } from '../network/NetworkManager';
+import { GeckosNetworkManager as NetworkManager, NetworkPlayer, NetworkBuilding } from '../network/GeckosNetworkManager';
 import { OtherPlayersManager } from './OtherPlayersManager';
 import { BuildingManager, BUILDING_DEFS } from './BuildingManager';
 import { CraftingSystem } from './Crafting';
+import { getPerformanceManager, PerformanceManager } from './PerformanceManager';
 
 export class Game {
   private app: Application;
@@ -37,6 +38,8 @@ export class Game {
   private positionSendThrottle = 50; // ms between position updates
   private lastPositionSendTime = 0;
   private playerName: string = '';
+  private performanceManager: PerformanceManager;
+  private entitiesVisible: boolean = true;
 
   constructor(mapManager: MapManager) {
     this.mapManager = mapManager;
@@ -45,10 +48,45 @@ export class Game {
     this.inventory = new Inventory();
     this.network = new NetworkManager();
     this.crafting = new CraftingSystem(this.inventory);
-    this.playerSpriteNum = Math.floor(Math.random() * 125) + 1;
+    this.performanceManager = getPerformanceManager();
 
-    // Load saved name from localStorage
-    this.playerName = localStorage.getItem('gallax_player_name') || '';
+    // Load saved sprite number from localStorage, or generate a random one
+    const savedSpriteNum = localStorage.getItem('gallax_player_sprite');
+    if (savedSpriteNum) {
+      this.playerSpriteNum = parseInt(savedSpriteNum, 10);
+    } else {
+      this.playerSpriteNum = Math.floor(Math.random() * 125) + 1;
+      localStorage.setItem('gallax_player_sprite', this.playerSpriteNum.toString());
+    }
+
+    // Load saved name from localStorage, or generate a random one
+    const savedName = localStorage.getItem('gallax_player_name');
+    if (savedName) {
+      this.playerName = savedName;
+    } else {
+      this.playerName = this.generateRandomName();
+      localStorage.setItem('gallax_player_name', this.playerName);
+    }
+  }
+
+  // Generate a fun random name for new players
+  private generateRandomName(): string {
+    const adjectives = [
+      'Swift', 'Brave', 'Clever', 'Lucky', 'Wild', 'Noble', 'Cosmic', 'Mystic',
+      'Fierce', 'Gentle', 'Silent', 'Golden', 'Crystal', 'Shadow', 'Storm',
+      'Frozen', 'Blazing', 'Ancient', 'Mighty', 'Sneaky', 'Happy', 'Chill',
+      'Epic', 'Pixel', 'Turbo', 'Ultra', 'Mega', 'Super', 'Hyper', 'Neon'
+    ];
+    const nouns = [
+      'Fox', 'Wolf', 'Bear', 'Eagle', 'Tiger', 'Lion', 'Dragon', 'Phoenix',
+      'Knight', 'Wizard', 'Ninja', 'Pirate', 'Ranger', 'Scout', 'Hunter',
+      'Owl', 'Hawk', 'Raven', 'Panda', 'Koala', 'Otter', 'Penguin', 'Cat',
+      'Explorer', 'Voyager', 'Wanderer', 'Nomad', 'Traveler', 'Seeker'
+    ];
+    const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+    const noun = nouns[Math.floor(Math.random() * nouns.length)];
+    const num = Math.floor(Math.random() * 100);
+    return `${adj}${noun}${num}`;
   }
 
   async init(): Promise<void> {
@@ -78,10 +116,10 @@ export class Game {
 
     console.log('Pixi app initialized, canvas added');
 
-    // Create player at map center
+    // Create player at map center with saved sprite
     const center = this.mapManager.getCenter();
     this.player = new Player(this.mapManager, center.lng, center.lat);
-    await this.player.init(this.app);
+    await this.player.init(this.app, this.playerSpriteNum);
 
     // Initialize resource manager
     this.resourceManager = new ResourceManager(this.mapManager, this.app);
@@ -120,16 +158,23 @@ export class Game {
       this.buildingManager?.updateAllPositions();
     });
 
-    // Respawn entities when moving to new areas
+    // Respawn entities when moving to new areas (performance-aware)
     this.mapManager.on('onMove', () => {
-      this.resourceManager?.spawnTreesInView();
+      const zoom = this.mapManager.getZoom();
+
+      // Always cull distant entities for memory
       this.resourceManager?.cullDistantResources();
-      this.npcManager?.spawnNPCsInView();
       this.npcManager?.cullDistantNPCs();
-      this.waterEntityManager?.spawnEntitiesInView();
       this.waterEntityManager?.cullDistantEntities();
-      this.terrainEntityManager?.spawnEntitiesInView();
       this.terrainEntityManager?.cullDistantEntities();
+
+      // Only spawn new entities when zoomed in enough
+      if (this.performanceManager.shouldSpawnEntities(zoom)) {
+        this.resourceManager?.spawnTreesInView();
+        this.npcManager?.spawnNPCsInView();
+        this.waterEntityManager?.spawnEntitiesInView();
+        this.terrainEntityManager?.spawnEntitiesInView();
+      }
     });
 
     // Update UI
@@ -256,7 +301,7 @@ export class Game {
     // Get input direction
     const input = this.inputManager.getDirection();
 
-    // Update player
+    // Update player (always runs)
     if (this.player) {
       this.player.setVelocity(input.x, input.y);
       this.player.update(deltaTime);
@@ -265,20 +310,46 @@ export class Game {
       this.sendPositionUpdate();
     }
 
-    // Update other players (smooth interpolation)
+    // Update other players (always runs for smooth multiplayer)
     this.otherPlayers?.update(deltaTime);
 
-    // Update NPCs
-    this.npcManager?.update(deltaTime);
+    // Performance: Check zoom level for entity updates
+    const zoom = this.mapManager.getZoom();
+    const shouldShowEntities = this.performanceManager.shouldShowEntities(zoom);
+    const shouldUpdateMovement = this.performanceManager.shouldUpdateMovement(zoom);
 
-    // Update water entities (fish and boats)
-    this.waterEntityManager?.update(deltaTime);
+    // Toggle entity visibility based on zoom
+    this.updateEntityVisibility(shouldShowEntities);
 
-    // Update terrain entities (trains, etc.)
-    this.terrainEntityManager?.update(deltaTime);
+    // Only update entity movement when zoomed in enough and throttled
+    if (shouldUpdateMovement && this.performanceManager.shouldUpdate()) {
+      // Update NPCs
+      this.npcManager?.update(deltaTime);
+
+      // Update water entities (fish and boats)
+      this.waterEntityManager?.update(deltaTime);
+
+      // Update terrain entities (trains, etc.)
+      this.terrainEntityManager?.update(deltaTime);
+    }
 
     // Follow train if enabled
     this.followTrain();
+  }
+
+  // Show/hide entities based on zoom level for performance
+  private updateEntityVisibility(shouldShow: boolean): void {
+    if (shouldShow === this.entitiesVisible) return;
+
+    this.entitiesVisible = shouldShow;
+
+    // Toggle visibility of all entity containers
+    this.npcManager?.setVisible(shouldShow);
+    this.waterEntityManager?.setVisible(shouldShow);
+    this.terrainEntityManager?.setVisible(shouldShow);
+    this.resourceManager?.setVisible(shouldShow);
+
+    console.log(`📊 Entities ${shouldShow ? 'shown' : 'hidden'} (zoom: ${this.mapManager.getZoom().toFixed(1)})`);
   }
 
   // Send position update to server (throttled)
@@ -392,9 +463,8 @@ export class Game {
       const resource = this.findResourceAtPoint(screenX, screenY, clickLng, clickLat);
 
       if (resource && this.player) {
-        // Check if resource was already collected by someone else
+        // Check if resource was already collected by someone else - silently skip
         if (this.collectedResourceIds.has(resource.id)) {
-          console.log('❌ Resource already collected');
           return;
         }
 
@@ -533,9 +603,8 @@ export class Game {
 
   // Collect a resource when player reaches it
   private collectResource(target: TargetResource): void {
-    // Skip if already collected (from server sync)
+    // Skip if already collected (from server sync) - silently
     if (this.collectedResourceIds.has(target.id)) {
-      console.log('❌ Resource already collected');
       return;
     }
 
@@ -655,7 +724,7 @@ export class Game {
       await this.network.connect({
         onInit: (playerId, players, collectedResources, buildings) => {
           console.log(`🎮 Received init as player ${playerId}`);
-          console.log(`👥 ${players.length} players online`);
+          console.log(`👥 ${players.length} players online:`, players.map(p => `${p.name}(${p.id})`));
           console.log(`🌲 ${collectedResources.length} resources already collected`);
           console.log(`🏠 ${buildings.length} buildings placed`);
 
@@ -663,10 +732,11 @@ export class Game {
           collectedResources.forEach(id => this.collectedResourceIds.add(id));
 
           // Add other players
-          players.forEach(p => {
-            if (p.id !== playerId) {
-              this.otherPlayers?.addPlayer(p);
-            }
+          const otherPlayerList = players.filter(p => p.id !== playerId);
+          console.log(`👥 Adding ${otherPlayerList.length} other players...`);
+          otherPlayerList.forEach(p => {
+            console.log(`  → Adding player ${p.name} (${p.id}) sprite=${p.spriteNum} at ${p.lng.toFixed(4)}, ${p.lat.toFixed(4)}`);
+            this.otherPlayers?.addPlayer(p);
           });
 
           // Add buildings
@@ -678,7 +748,7 @@ export class Game {
           }
         },
         onPlayerJoined: (player) => {
-          console.log(`👋 Player ${player.name} joined!`);
+          console.log(`👋 Player ${player.name} joined with sprite=${player.spriteNum}`);
           this.otherPlayers?.addPlayer(player);
         },
         onPlayerLeft: (playerId) => {
@@ -706,7 +776,7 @@ export class Game {
       // Send join message immediately after connection is established
       const pos = this.player?.getPosition();
       if (pos) {
-        console.log(`📤 Sending join message with name: "${this.playerName}"`);
+        console.log(`📤 Sending join message with name: "${this.playerName}", sprite: ${this.playerSpriteNum}`);
         this.network.join(pos.lng, pos.lat, this.playerSpriteNum, this.playerName);
       }
     } catch (error) {

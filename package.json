@@ -7,6 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "server": "npx tsx server/index.ts",
     "dev:all": "concurrently \"npm run server\" \"npm run dev\"",
     "cf:types": "wrangler types",
@@ -15,6 +18,8 @@
     "cf:tail": "wrangler tail"
   },
   "dependencies": {
+    "@geckos.io/client": "^3.0.2",
+    "@geckos.io/snapshot-interpolation": "^1.1.1",
     "mapbox-gl": "^3.9.4",
     "pixi.js": "^8.6.6",
     "ws": "^8.18.0"

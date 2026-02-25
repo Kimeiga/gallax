@@ -1,6 +1,7 @@
 import { Application, Sprite, Assets, Texture } from 'pixi.js';
 import type { MapboxGeoJSONFeature } from 'mapbox-gl';
 import { MapManager } from '../map/MapManager';
+import { getPerformanceManager } from './PerformanceManager';
 
 // Seeded PRNG for deterministic NPC behavior
 class SeededRandom {
@@ -80,6 +81,11 @@ export class NPCManager {
   spawnNPCsInView(): void {
     if (this.textures.length === 0) return;
 
+    const performanceManager = getPerformanceManager();
+
+    // Check if we've hit entity limit
+    if (!performanceManager.canSpawnNPC(this.npcs.size)) return;
+
     const map = this.mapManager.getMap();
     const bounds = map.getBounds();
     if (!bounds) return;
@@ -91,6 +97,9 @@ export class NPCManager {
 
     for (let lng = Math.floor(sw.lng / cellSize) * cellSize; lng < ne.lng; lng += cellSize) {
       for (let lat = Math.floor(sw.lat / cellSize) * cellSize; lat < ne.lat; lat += cellSize) {
+        // Check limit again during spawning
+        if (!performanceManager.canSpawnNPC(this.npcs.size)) return;
+
         const cellId = `${lng.toFixed(4)},${lat.toFixed(4)}`;
 
         if (this.spawnedAreas.has(cellId)) continue;
@@ -100,6 +109,8 @@ export class NPCManager {
         const rng = new SeededRandom(seed);
 
         for (let i = 0; i < this.NPCS_PER_AREA; i++) {
+          if (!performanceManager.canSpawnNPC(this.npcs.size)) break;
+
           const npcLng = rng.range(lng, lng + cellSize);
           const npcLat = rng.range(lat, lat + cellSize);
 
@@ -246,6 +257,18 @@ export class NPCManager {
         this.spawnedAreas.delete(cellId);
       }
     }
+  }
+
+  // Toggle visibility of all NPCs (performance optimization)
+  setVisible(visible: boolean): void {
+    for (const npc of this.npcs.values()) {
+      npc.sprite.visible = visible;
+    }
+  }
+
+  // Get current NPC count
+  getCount(): number {
+    return this.npcs.size;
   }
 }
 

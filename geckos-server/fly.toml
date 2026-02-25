@@ -1,0 +1,43 @@
+# Fly.io configuration for Gallax geckos.io server
+app = "gallax-server"
+primary_region = "ewr"  # Newark, NJ (close to NYC)
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1  # Keep 1 machine always running for WebRTC signaling consistency
+
+[[services]]
+  internal_port = 3000
+  protocol = "tcp"
+
+  [[services.ports]]
+    handlers = ["http"]
+    port = 80
+    force_https = true
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
+
+# UDP services for WebRTC/geckos.io
+[[services]]
+  internal_port = 9208
+  protocol = "udp"
+
+  [[services.ports]]
+    port = 9208
+
+[env]
+  NODE_ENV = "production"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+

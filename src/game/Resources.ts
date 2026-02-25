@@ -1,6 +1,7 @@
 import { Application, Text, TextStyle } from 'pixi.js';
 import mapboxgl from 'mapbox-gl';
 import { MapManager } from '../map/MapManager';
+import { getPerformanceManager } from './PerformanceManager';
 
 // Tree and vegetation emojis
 const TREE_EMOJIS = ['🌲', '🌳', '🌴', '🌵', '🌿', '🍀', '🌱', '🪴', '🎋', '🎍', '☘️', '🍃', '🌾'];
@@ -74,6 +75,11 @@ export class ResourceManager {
 
   // Spawn trees in all visible green areas
   spawnTreesInView(): void {
+    const performanceManager = getPerformanceManager();
+
+    // Check if we've hit entity limit
+    if (!performanceManager.canSpawnResource(this.resources.size)) return;
+
     const map = this.mapManager.getMap();
 
     // Query all visible green space features
@@ -87,6 +93,9 @@ export class ResourceManager {
     let spawned = 0;
 
     for (const feature of greenFeatures) {
+      // Check limit again during spawning
+      if (!performanceManager.canSpawnResource(this.resources.size)) break;
+
       // Create a deterministic ID from the polygon's geometry
       // This ensures ALL clients generate the same ID for the same polygon
       const geometry = feature.geometry;
@@ -112,6 +121,8 @@ export class ResourceManager {
 
       let spawnedInFeature = 0;
       for (let i = 0; i < treesToSpawn * attemptsPerTree && spawnedInFeature < treesToSpawn; i++) {
+        if (!performanceManager.canSpawnResource(this.resources.size)) break;
+
         // Use seeded RNG instead of Math.random()!
         const lng = rng.range(bbox.minLng, bbox.maxLng);
         const lat = rng.range(bbox.minLat, bbox.maxLat);
@@ -280,6 +291,13 @@ export class ResourceManager {
     if (resource) {
       resource.text.destroy();
       this.resources.delete(id);
+    }
+  }
+
+  // Toggle visibility of all resources (performance optimization)
+  setVisible(visible: boolean): void {
+    for (const resource of this.resources.values()) {
+      resource.text.visible = visible;
     }
   }
 }

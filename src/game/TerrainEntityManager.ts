@@ -1,6 +1,7 @@
 import { Application, Text, TextStyle } from 'pixi.js';
 import type { MapboxGeoJSONFeature } from 'mapbox-gl';
 import { MapManager } from '../map/MapManager';
+import { getPerformanceManager } from './PerformanceManager';
 
 // Emoji sets for different terrain types
 const EMOJIS = {
@@ -84,6 +85,11 @@ export class TerrainEntityManager {
   }
 
   spawnEntitiesInView(): void {
+    const performanceManager = getPerformanceManager();
+
+    // Check if we've hit entity limit
+    if (!performanceManager.canSpawnTerrainEntity(this.entities.size)) return;
+
     const map = this.mapManager.getMap();
     const bounds = map.getBounds();
     if (!bounds) return;
@@ -94,6 +100,9 @@ export class TerrainEntityManager {
 
     for (let lng = Math.floor(sw.lng / cellSize) * cellSize; lng < ne.lng; lng += cellSize) {
       for (let lat = Math.floor(sw.lat / cellSize) * cellSize; lat < ne.lat; lat += cellSize) {
+        // Check limit again during spawning
+        if (!performanceManager.canSpawnTerrainEntity(this.entities.size)) return;
+
         const cellId = `terrain-${lng.toFixed(4)},${lat.toFixed(4)}`;
         if (this.spawnedCells.has(cellId)) continue;
         this.spawnedCells.add(cellId);
@@ -116,11 +125,15 @@ export class TerrainEntityManager {
       }
     }
 
-    // Also spawn POIs
-    this.spawnPOIsInView();
+    // Also spawn POIs (only if we can spawn more)
+    if (performanceManager.canSpawnTerrainEntity(this.entities.size)) {
+      this.spawnPOIsInView();
+    }
 
     // Also try to spawn rail entities by querying rail lines directly
-    this.spawnRailEntities();
+    if (performanceManager.canSpawnTerrainEntity(this.entities.size)) {
+      this.spawnRailEntities();
+    }
   }
 
   private spawnRailEntities(): void {
@@ -498,5 +511,17 @@ export class TerrainEntityManager {
       entity.text.destroy();
       this.entities.delete(id);
     }
+  }
+
+  // Toggle visibility of all entities (performance optimization)
+  setVisible(visible: boolean): void {
+    for (const entity of this.entities.values()) {
+      entity.text.visible = visible;
+    }
+  }
+
+  // Get current entity count
+  getCount(): number {
+    return this.entities.size;
   }
 }
