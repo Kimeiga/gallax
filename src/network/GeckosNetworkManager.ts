@@ -53,11 +53,12 @@ export class GeckosNetworkManager {
     if (serverUrl) {
       this.serverUrl = serverUrl;
     } else {
-      // Production: Vultr VPS in Chicago
+      // Production: Cloudflare Tunnel for HTTPS signaling
       const isProduction = window.location.hostname !== 'localhost' &&
                            window.location.hostname !== '127.0.0.1';
       if (isProduction) {
-        this.serverUrl = 'http://207.148.15.120:3000';
+        // Use Cloudflare Tunnel for HTTPS (signaling only, WebRTC uses direct UDP)
+        this.serverUrl = 'https://grip-attendance-programs-gourmet.trycloudflare.com';
       } else {
         this.serverUrl = 'http://localhost:3000';
       }
