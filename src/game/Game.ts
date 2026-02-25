@@ -49,6 +49,13 @@ export class Game {
   private chatMessages: ChatMessage[] = [];
   private maxChatMessages = 50;
 
+  // Building rotation
+  private selectedBuildingId: string | null = null;
+  private rotationHandleEl: HTMLElement | null = null;
+  private isRotating = false;
+  private rotationStartAngle = 0;
+  private buildingStartRotation = 0;
+
   constructor(mapManager: MapManager) {
     this.mapManager = mapManager;
     this.app = new Application();
@@ -442,7 +449,7 @@ export class Game {
     return features.length > 0;
   }
 
-  // Setup click handler for: resource collection, click-to-move, building placement
+  // Setup click handler for: resource collection, click-to-move, building placement, building rotation
   private setupMapClickHandler(): void {
     const map = this.mapManager.getMap();
 
@@ -456,6 +463,18 @@ export class Game {
       if (this.isPlacingBuilding && this.crafting.getSelectedBuilding()) {
         this.handleBuildingPlacement(clickLng, clickLat);
         return;
+      }
+
+      // Check if clicked on a building (for rotation)
+      const building = this.buildingManager?.getBuildingAtPosition(screenX, screenY);
+      if (building) {
+        this.selectBuildingForRotation(building.id);
+        return;
+      }
+
+      // Clicking elsewhere deselects any selected building
+      if (this.selectedBuildingId) {
+        this.deselectBuilding();
       }
 
       // Check if clicked on a resource
@@ -533,6 +552,164 @@ export class Game {
       this.isPlacingBuilding = false;
       this.crafting.selectBuilding(null);
       this.updateCraftingUI();
+    }
+  }
+
+  // Select a building for rotation
+  private selectBuildingForRotation(buildingId: string): void {
+    // Deselect previous building if any
+    if (this.selectedBuildingId) {
+      this.deselectBuilding();
+    }
+
+    this.selectedBuildingId = buildingId;
+    console.log(`🔄 Selected building ${buildingId} for rotation`);
+
+    // Create rotation handle
+    this.createRotationHandle();
+  }
+
+  // Deselect building and remove rotation handle
+  private deselectBuilding(): void {
+    this.selectedBuildingId = null;
+    this.removeRotationHandle();
+  }
+
+  // Create the rotation handle UI (white circle above the building)
+  private createRotationHandle(): void {
+    this.removeRotationHandle();
+
+    if (!this.selectedBuildingId || !this.buildingManager) return;
+
+    const building = this.buildingManager.getBuildings().get(this.selectedBuildingId);
+    if (!building) return;
+
+    // Create handle element
+    const handle = document.createElement('div');
+    handle.id = 'rotation-handle';
+    handle.style.cssText = `
+      position: fixed;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: white;
+      border: 2px solid #333;
+      cursor: grab;
+      z-index: 1000;
+      transform: translate(-50%, -50%);
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    `;
+
+    document.body.appendChild(handle);
+    this.rotationHandleEl = handle;
+
+    // Position the handle
+    this.updateRotationHandlePosition();
+
+    // Add drag handlers
+    let isDragging = false;
+
+    const onStart = (clientX: number, clientY: number) => {
+      isDragging = true;
+      this.isRotating = true;
+      handle.style.cursor = 'grabbing';
+
+      // Calculate start angle from building center to handle
+      const building = this.buildingManager?.getBuildings().get(this.selectedBuildingId!);
+      if (building) {
+        const screenPos = this.mapManager.project({ lng: building.lng, lat: building.lat });
+        this.rotationStartAngle = Math.atan2(clientY - screenPos.y, clientX - screenPos.x);
+        this.buildingStartRotation = building.rotation;
+      }
+    };
+
+    const onMove = (clientX: number, clientY: number) => {
+      if (!isDragging || !this.selectedBuildingId) return;
+
+      const building = this.buildingManager?.getBuildings().get(this.selectedBuildingId);
+      if (!building) return;
+
+      // Calculate current angle from building center
+      const screenPos = this.mapManager.project({ lng: building.lng, lat: building.lat });
+      const currentAngle = Math.atan2(clientY - screenPos.y, clientX - screenPos.x);
+
+      // Calculate rotation delta
+      const angleDelta = currentAngle - this.rotationStartAngle;
+      const newRotation = this.buildingStartRotation + angleDelta;
+
+      // Apply rotation locally
+      this.buildingManager?.rotateBuilding(this.selectedBuildingId, newRotation);
+
+      // Update handle position
+      this.updateRotationHandlePosition();
+    };
+
+    const onEnd = () => {
+      if (!isDragging) return;
+      isDragging = false;
+      this.isRotating = false;
+      handle.style.cursor = 'grab';
+
+      // Send final rotation to server
+      if (this.selectedBuildingId) {
+        const building = this.buildingManager?.getBuildings().get(this.selectedBuildingId);
+        if (building) {
+          console.log(`🔄 Broadcasting rotation: ${building.rotation.toFixed(2)} rad`);
+          this.network.rotateBuilding(this.selectedBuildingId, building.rotation);
+        }
+      }
+    };
+
+    // Mouse events
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      onStart(e.clientX, e.clientY);
+    });
+    document.addEventListener('mousemove', (e) => onMove(e.clientX, e.clientY));
+    document.addEventListener('mouseup', onEnd);
+
+    // Touch events
+    handle.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      onStart(touch.clientX, touch.clientY);
+    });
+    document.addEventListener('touchmove', (e) => {
+      const touch = e.touches[0];
+      onMove(touch.clientX, touch.clientY);
+    });
+    document.addEventListener('touchend', onEnd);
+  }
+
+  // Update the position of the rotation handle
+  private updateRotationHandlePosition(): void {
+    if (!this.rotationHandleEl || !this.selectedBuildingId || !this.buildingManager) return;
+
+    const building = this.buildingManager.getBuildings().get(this.selectedBuildingId);
+    if (!building) return;
+
+    // Get building screen position
+    const screenPos = this.mapManager.project({ lng: building.lng, lat: building.lat });
+
+    // Calculate handle position above the building (rotated)
+    const zoom = this.mapManager.getZoom();
+    const scale = Math.pow(2, zoom - 16) * 1.5;
+    const handleDistance = 40 * scale; // Distance from center to handle
+
+    // Handle is above the building, rotated by building rotation
+    const handleAngle = building.rotation - Math.PI / 2; // Start at top
+    const handleX = screenPos.x + Math.cos(handleAngle) * handleDistance;
+    const handleY = screenPos.y + Math.sin(handleAngle) * handleDistance;
+
+    this.rotationHandleEl.style.left = `${handleX}px`;
+    this.rotationHandleEl.style.top = `${handleY}px`;
+  }
+
+  // Remove the rotation handle
+  private removeRotationHandle(): void {
+    if (this.rotationHandleEl) {
+      this.rotationHandleEl.remove();
+      this.rotationHandleEl = null;
     }
   }
 
@@ -772,6 +949,14 @@ export class Game {
         onBuildingPlaced: (building) => {
           console.log(`🏠 Building ${building.type} placed by ${building.ownerId}`);
           this.buildingManager?.addBuilding(building);
+        },
+        onBuildingRotated: (buildingId, rotation) => {
+          console.log(`🔄 Building ${buildingId} rotated to ${rotation.toFixed(2)} rad`);
+          this.buildingManager?.rotateBuilding(buildingId, rotation);
+          // Update rotation handle if this is the selected building
+          if (buildingId === this.selectedBuildingId) {
+            this.updateRotationHandlePosition();
+          }
         },
         onChatMessage: (message) => {
           this.addChatMessage(message);

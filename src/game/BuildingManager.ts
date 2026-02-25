@@ -13,27 +13,27 @@ export const BUILDING_DEFS: Record<string, BuildingDef> = {
   house: {
     emoji: '🏠',
     name: 'House',
-    cost: { wood: 10, stone: 5 },
+    cost: {}, // Free for testing
   },
   farm: {
     emoji: '🌾',
     name: 'Farm',
-    cost: { wood: 5, herb: 3 },
+    cost: {}, // Free for testing
   },
   shop: {
     emoji: '🏪',
     name: 'Shop',
-    cost: { wood: 8, stone: 8, gem: 2 },
+    cost: {}, // Free for testing
   },
   dock: {
     emoji: '⚓',
     name: 'Dock',
-    cost: { wood: 15, fish: 5, shell: 3 },
+    cost: {}, // Free for testing
   },
   tower: {
     emoji: '🗼',
     name: 'Tower',
-    cost: { stone: 20, gem: 5 },
+    cost: {}, // Free for testing
   },
 };
 
@@ -44,6 +44,7 @@ interface PlacedBuilding {
   lng: number;
   lat: number;
   ownerId: string;
+  rotation: number; // Rotation in radians
 }
 
 export class BuildingManager {
@@ -69,7 +70,7 @@ export class BuildingManager {
     });
 
     const text = new Text({ text: def.emoji, style });
-    text.anchor.set(0.5, 1);
+    text.anchor.set(0.5, 0.5); // Center anchor for proper rotation
 
     this.app.stage.addChild(text);
 
@@ -80,6 +81,7 @@ export class BuildingManager {
       lng: building.lng,
       lat: building.lat,
       ownerId: building.ownerId,
+      rotation: building.rotation || 0,
     };
 
     this.buildings.set(building.id, placed);
@@ -94,6 +96,31 @@ export class BuildingManager {
     }
   }
 
+  // Update building rotation
+  rotateBuilding(buildingId: string, rotation: number): void {
+    const building = this.buildings.get(buildingId);
+    if (building) {
+      building.rotation = rotation;
+      building.text.rotation = rotation;
+    }
+  }
+
+  // Get building at screen position (for click detection)
+  getBuildingAtPosition(screenX: number, screenY: number): PlacedBuilding | null {
+    for (const building of this.buildings.values()) {
+      const bounds = building.text.getBounds();
+      if (
+        screenX >= bounds.x &&
+        screenX <= bounds.x + bounds.width &&
+        screenY >= bounds.y &&
+        screenY <= bounds.y + bounds.height
+      ) {
+        return building;
+      }
+    }
+    return null;
+  }
+
   private updateBuildingPosition(building: PlacedBuilding): void {
     const screenPos = this.mapManager.project({ lng: building.lng, lat: building.lat });
     building.text.x = Math.round(screenPos.x);
@@ -103,6 +130,9 @@ export class BuildingManager {
     const zoom = this.mapManager.getZoom();
     const scale = Math.pow(2, zoom - this.baseZoom) * 1.5;
     building.text.scale.set(scale);
+
+    // Apply rotation
+    building.text.rotation = building.rotation;
   }
 
   updateAllPositions(): void {

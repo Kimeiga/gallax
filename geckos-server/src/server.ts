@@ -18,6 +18,7 @@ interface Building {
   lat: number;
   ownerId: string;
   placedAt: number;
+  rotation: number; // Rotation in radians
 }
 
 // Game state
@@ -253,9 +254,20 @@ io.onConnection((channel: ServerChannel) => {
       lat: msg.lat,
       ownerId: playerId,
       placedAt: Date.now(),
+      rotation: 0, // Default rotation
     };
     buildings.set(building.id, building);
     io.emit('building_placed', { building }, { reliable: true });
+  });
+
+  // Handle building rotation (reliable)
+  channel.on('rotate_building', (data: Data) => {
+    const msg = data as { buildingId: string; rotation: number };
+    const building = buildings.get(msg.buildingId);
+    if (building) {
+      building.rotation = msg.rotation;
+      io.emit('building_rotated', { buildingId: msg.buildingId, rotation: msg.rotation }, { reliable: true });
+    }
   });
 
   // Handle name change (reliable)

@@ -24,6 +24,7 @@ export interface NetworkBuilding {
   lat: number;
   ownerId: string;
   placedAt: number;
+  rotation: number; // Rotation in radians
 }
 
 export interface ChatMessage {
@@ -55,6 +56,7 @@ export type MessageHandler = {
   onPlayerNameChanged: (playerId: string, name: string) => void;
   onResourceCollected: (resourceId: string, playerId: string) => void;
   onBuildingPlaced: (building: NetworkBuilding) => void;
+  onBuildingRotated?: (buildingId: string, rotation: number) => void;
   onChatMessage?: (message: ChatMessage) => void;
   onSnapshot?: (snapshot: unknown) => void;
   onPositionCorrection?: PositionCorrectionCallback;
@@ -213,6 +215,13 @@ export class GeckosNetworkManager {
       this.handlers!.onBuildingPlaced(msg.building);
     });
 
+    this.channel.on('building_rotated', (data: Data) => {
+      const msg = data as { buildingId: string; rotation: number };
+      if (this.handlers!.onBuildingRotated) {
+        this.handlers!.onBuildingRotated(msg.buildingId, msg.rotation);
+      }
+    });
+
     // Chat messages
     this.channel.on('chat_message', (data: Data) => {
       const msg = data as ChatMessage;
@@ -330,6 +339,10 @@ export class GeckosNetworkManager {
 
   placeBuilding(buildingType: string, lng: number, lat: number) {
     this.channel?.emit('place_building', { buildingType, lng, lat }, { reliable: true });
+  }
+
+  rotateBuilding(buildingId: string, rotation: number) {
+    this.channel?.emit('rotate_building', { buildingId, rotation }, { reliable: true });
   }
 
   setName(name: string) {

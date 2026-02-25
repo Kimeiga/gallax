@@ -15,6 +15,7 @@ export interface NetworkBuilding {
   lat: number;
   ownerId: string;
   placedAt: number;
+  rotation: number; // Rotation in radians
 }
 
 export type MessageHandler = {
