@@ -12,6 +12,8 @@ import { OtherPlayersManager } from './OtherPlayersManager';
 import { BuildingManager, BUILDING_DEFS } from './BuildingManager';
 import { CraftingSystem } from './Crafting';
 import { getPerformanceManager, PerformanceManager } from './PerformanceManager';
+import { authService } from '../auth/AuthService';
+import { buildingsAPI } from '../api/BuildingsAPI';
 
 export class Game {
   private app: Application;
@@ -209,6 +211,9 @@ export class Game {
 
     // Connect to multiplayer server
     await this.connectToServer();
+
+    // Load persistent buildings from D1 (if logged in)
+    await this.loadBuildingsFromD1();
 
     // Expose debug functions on window for testing
     this.exposeDebugFunctions();
@@ -552,8 +557,24 @@ export class Game {
 
     // Consume resources and place building
     if (this.crafting.craft(buildingType)) {
+      // Generate building ID
+      const buildingId = `bld_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+      // Broadcast to other players via geckos
       this.network.placeBuilding(buildingType, lng, lat);
       console.log(`🏗️ Placed ${BUILDING_DEFS[buildingType].emoji} ${BUILDING_DEFS[buildingType].name}!`);
+
+      // If logged in, persist to D1
+      if (authService.isAuthenticated()) {
+        buildingsAPI.create({ id: buildingId, type: buildingType, lng, lat, rotation: 0 })
+          .then(success => {
+            if (success) {
+              console.log(`💾 Building saved to database`);
+            } else {
+              console.warn(`⚠️ Failed to persist building to database`);
+            }
+          });
+      }
 
       // Exit placement mode
       this.isPlacingBuilding = false;
@@ -732,6 +753,14 @@ export class Game {
         if (building) {
           console.log(`🔄 Broadcasting rotation: ${building.rotation.toFixed(2)} rad`);
           this.network.rotateBuilding(this.selectedBuildingId, building.rotation);
+
+          // If logged in, persist to D1
+          if (authService.isAuthenticated()) {
+            buildingsAPI.update(this.selectedBuildingId, { rotation: building.rotation })
+              .then(success => {
+                if (success) console.log(`💾 Rotation saved to database`);
+              });
+          }
         }
       }
     };
@@ -843,6 +872,14 @@ export class Game {
         if (building) {
           console.log(`📍 Broadcasting move: ${building.lng.toFixed(5)}, ${building.lat.toFixed(5)}`);
           this.network.moveBuilding(this.selectedBuildingId, building.lng, building.lat);
+
+          // If logged in, persist to D1
+          if (authService.isAuthenticated()) {
+            buildingsAPI.update(this.selectedBuildingId, { lng: building.lng, lat: building.lat })
+              .then(success => {
+                if (success) console.log(`💾 Position saved to database`);
+              });
+          }
         }
       }
 
@@ -1136,6 +1173,38 @@ export class Game {
           setTimeout(() => parent.classList.remove('pulse'), 300);
         }
       }
+    }
+  }
+
+  // Load buildings from D1 database (for persistence)
+  private async loadBuildingsFromD1(): Promise<void> {
+    try {
+      console.log('📂 Loading buildings from D1...');
+      const buildings = await buildingsAPI.getAll();
+
+      if (buildings.length > 0) {
+        console.log(`📂 Loaded ${buildings.length} buildings from D1`);
+
+        // Add buildings that don't already exist
+        const existingBuildings = this.buildingManager?.getBuildings();
+        for (const b of buildings) {
+          if (!existingBuildings?.has(b.id)) {
+            this.buildingManager?.addBuilding({
+              id: b.id,
+              type: b.type,
+              lng: b.lng,
+              lat: b.lat,
+              rotation: b.rotation || 0,
+              ownerId: b.owner_id,
+              placedAt: new Date(b.created_at).getTime(),
+            });
+          }
+        }
+      } else {
+        console.log('📂 No buildings in D1');
+      }
+    } catch (err) {
+      console.error('Failed to load buildings from D1:', err);
     }
   }
 
