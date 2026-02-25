@@ -101,22 +101,40 @@ function generateId(): string {
   return Math.random().toString(36).substring(2, 10);
 }
 
-// Generate a fun random name for players without one
-function generateRandomName(): string {
+// Generate a fun random name for players that's unique in the lobby
+function generateUniqueRandomName(): string {
   const adjectives = [
     'Swift', 'Brave', 'Clever', 'Lucky', 'Wild', 'Noble', 'Cosmic', 'Mystic',
     'Fierce', 'Gentle', 'Silent', 'Golden', 'Crystal', 'Shadow', 'Storm',
-    'Frozen', 'Blazing', 'Ancient', 'Mighty', 'Sneaky', 'Happy', 'Chill'
+    'Frozen', 'Blazing', 'Ancient', 'Mighty', 'Sneaky', 'Happy', 'Chill',
+    'Epic', 'Pixel', 'Turbo', 'Ultra', 'Mega', 'Super', 'Hyper', 'Neon'
   ];
   const nouns = [
     'Fox', 'Wolf', 'Bear', 'Eagle', 'Tiger', 'Lion', 'Dragon', 'Phoenix',
     'Knight', 'Wizard', 'Ninja', 'Pirate', 'Ranger', 'Scout', 'Hunter',
-    'Owl', 'Hawk', 'Raven', 'Panda', 'Koala', 'Otter', 'Penguin'
+    'Owl', 'Hawk', 'Raven', 'Panda', 'Koala', 'Otter', 'Penguin', 'Cat',
+    'Explorer', 'Voyager', 'Wanderer', 'Nomad', 'Traveler', 'Seeker'
   ];
+
+  // Get all existing names in the lobby
+  const existingNames = new Set(Array.from(players.values()).map(p => p.name));
+
+  // Try to generate a unique name (max 100 attempts to avoid infinite loop)
+  for (let i = 0; i < 100; i++) {
+    const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+    const noun = nouns[Math.floor(Math.random() * nouns.length)];
+    const num = Math.floor(Math.random() * 100);
+    const name = `${adj}${noun}${num}`;
+
+    if (!existingNames.has(name)) {
+      return name;
+    }
+  }
+
+  // Fallback: use timestamp to guarantee uniqueness
   const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
   const noun = nouns[Math.floor(Math.random() * nouns.length)];
-  const num = Math.floor(Math.random() * 100);
-  return `${adj}${noun}${num}`;
+  return `${adj}${noun}${Date.now() % 10000}`;
 }
 
 function cleanupExpiredResources(): void {
@@ -151,20 +169,24 @@ io.onConnection((channel: ServerChannel) => {
   channels.set(playerId, channel);
   console.log(`👤 Player ${playerId} connected (${channels.size} total)`);
 
-  // Handle join
+  // Handle join - server always assigns a unique name
   channel.on('join', (data: Data) => {
-    const msg = data as { spriteNum?: number; lng: number; lat: number; name?: string };
+    const msg = data as { spriteNum?: number; lng: number; lat: number };
+
+    // Server assigns a unique name (ignore any client-provided name)
+    const assignedName = generateUniqueRandomName();
+
     const player: Player = {
       id: playerId,
       spriteNum: msg.spriteNum || Math.floor(Math.random() * 125) + 1,
       lng: msg.lng,
       lat: msg.lat,
-      name: msg.name || generateRandomName(),
+      name: assignedName,
     };
     players.set(playerId, player);
     cleanupExpiredResources();
-    
-    // Send init (reliable)
+
+    // Send init (reliable) - includes the assigned name
     channel.emit('init', {
       playerId,
       players: Array.from(players.values()),

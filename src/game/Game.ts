@@ -59,34 +59,8 @@ export class Game {
       localStorage.setItem('gallax_player_sprite', this.playerSpriteNum.toString());
     }
 
-    // Load saved name from localStorage, or generate a random one
-    const savedName = localStorage.getItem('gallax_player_name');
-    if (savedName) {
-      this.playerName = savedName;
-    } else {
-      this.playerName = this.generateRandomName();
-      localStorage.setItem('gallax_player_name', this.playerName);
-    }
-  }
-
-  // Generate a fun random name for new players
-  private generateRandomName(): string {
-    const adjectives = [
-      'Swift', 'Brave', 'Clever', 'Lucky', 'Wild', 'Noble', 'Cosmic', 'Mystic',
-      'Fierce', 'Gentle', 'Silent', 'Golden', 'Crystal', 'Shadow', 'Storm',
-      'Frozen', 'Blazing', 'Ancient', 'Mighty', 'Sneaky', 'Happy', 'Chill',
-      'Epic', 'Pixel', 'Turbo', 'Ultra', 'Mega', 'Super', 'Hyper', 'Neon'
-    ];
-    const nouns = [
-      'Fox', 'Wolf', 'Bear', 'Eagle', 'Tiger', 'Lion', 'Dragon', 'Phoenix',
-      'Knight', 'Wizard', 'Ninja', 'Pirate', 'Ranger', 'Scout', 'Hunter',
-      'Owl', 'Hawk', 'Raven', 'Panda', 'Koala', 'Otter', 'Penguin', 'Cat',
-      'Explorer', 'Voyager', 'Wanderer', 'Nomad', 'Traveler', 'Seeker'
-    ];
-    const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
-    const noun = nouns[Math.floor(Math.random() * nouns.length)];
-    const num = Math.floor(Math.random() * 100);
-    return `${adj}${noun}${num}`;
+    // Name will be assigned by server on join
+    this.playerName = '';
   }
 
   async init(): Promise<void> {
@@ -731,6 +705,14 @@ export class Game {
           // Track already collected resources
           collectedResources.forEach(id => this.collectedResourceIds.add(id));
 
+          // Get the server-assigned name for this player
+          const myPlayer = players.find(p => p.id === playerId);
+          if (myPlayer) {
+            this.playerName = myPlayer.name;
+            this.player?.setName(this.playerName);
+            console.log(`📛 Server assigned name: "${this.playerName}"`);
+          }
+
           // Add other players
           const otherPlayerList = players.filter(p => p.id !== playerId);
           console.log(`👥 Adding ${otherPlayerList.length} other players...`);
@@ -741,11 +723,6 @@ export class Game {
 
           // Add buildings
           buildings.forEach(b => this.buildingManager?.addBuilding(b));
-
-          // Set local player name if we have one
-          if (this.playerName) {
-            this.player?.setName(this.playerName);
-          }
         },
         onPlayerJoined: (player) => {
           console.log(`👋 Player ${player.name} joined with sprite=${player.spriteNum}`);
@@ -773,23 +750,23 @@ export class Game {
         },
       });
 
-      // Send join message immediately after connection is established
+      // Send join message - server will assign a unique name
       const pos = this.player?.getPosition();
       if (pos) {
-        console.log(`📤 Sending join message with name: "${this.playerName}", sprite: ${this.playerSpriteNum}`);
-        this.network.join(pos.lng, pos.lat, this.playerSpriteNum, this.playerName);
+        console.log(`📤 Sending join message with sprite: ${this.playerSpriteNum}`);
+        this.network.join(pos.lng, pos.lat, this.playerSpriteNum);
       }
     } catch (error) {
       console.error('Failed to connect to server:', error);
     }
   }
 
-  // Create name input UI
+  // Create name input UI - empty input, type to change your server-assigned name
   private createNameInputUI(): void {
     const nameContainer = document.createElement('div');
     nameContainer.id = 'name-input-container';
     nameContainer.innerHTML = `
-      <input type="text" id="player-name-input" placeholder="Enter your name..." maxlength="20" value="${this.playerName}">
+      <input type="text" id="player-name-input" placeholder="Change name..." maxlength="20" value="">
       <button id="set-name-btn">Set</button>
     `;
     document.body.appendChild(nameContainer);
@@ -800,12 +777,12 @@ export class Game {
     const setName = () => {
       const name = input.value.trim();
       if (name) {
-        console.log(`📛 Setting player name to "${name}"`);
+        console.log(`📛 Changing player name to "${name}"`);
         this.playerName = name;
-        localStorage.setItem('gallax_player_name', name);
         this.player?.setName(name);
         this.network.setName(name);
-        console.log(`📛 Name sent to server`);
+        console.log(`📛 Name change sent to server`);
+        input.value = ''; // Clear input after setting
         input.blur();
       }
     };
