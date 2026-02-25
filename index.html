@@ -20,6 +20,20 @@
     <div id="coords"></div>
     <div id="zoom-level"></div>
   </div>
+  <!-- Login/User UI -->
+  <div id="auth-ui">
+    <div id="login-container">
+      <button id="google-login-btn">
+        <img src="https://www.google.com/favicon.ico" alt="Google" width="18" height="18">
+        <span>Login with Google</span>
+      </button>
+    </div>
+    <div id="user-container" style="display: none;">
+      <img id="user-avatar" src="" alt="Avatar">
+      <span id="user-name"></span>
+      <button id="logout-btn">Logout</button>
+    </div>
+  </div>
   <!-- Mobile UI buttons -->
   <div id="mobile-ui-buttons"></div>
   <script type="module" src="/src/main.ts"></script>

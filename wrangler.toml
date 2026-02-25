@@ -1,27 +1,19 @@
-name = "kimunyc"
-main = "worker/index.ts"
+name = "gallax"
+pages_build_output_dir = "./dist"
 compatibility_date = "2024-12-01"
 
 # Enable Node.js compatibility for some APIs
 compatibility_flags = ["nodejs_compat"]
 
-# Durable Objects bindings
-[[durable_objects.bindings]]
-name = "GAME_SERVER"
-class_name = "GameServer"
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "gallax-db"
+database_id = "a8314c51-e9e0-4f53-88b3-6f1b0452987c"
 
-# Migrations for Durable Objects (free plan requires new_sqlite_classes)
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["GameServer"]
-
-# Static assets for the frontend (served from dist/)
-[assets]
-directory = "./dist"
-
-# Environment variables
+# Environment variables (secrets set via wrangler secret)
 [vars]
-ENVIRONMENT = "production"
+GOOGLE_CLIENT_ID = "229127808754-a8b7m4kls6vtnbalb52o7n4hhcs2d2ee.apps.googleusercontent.com"
 
 # Development settings
 [dev]

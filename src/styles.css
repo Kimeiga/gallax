@@ -570,3 +570,94 @@ html, body {
   bottom: 10px;
   right: 10px;
 }
+
+/* Auth UI */
+#auth-ui {
+  position: fixed;
+  top: 10px;
+  right: 60px;
+  z-index: 200;
+}
+
+@media (pointer: coarse) {
+  #auth-ui {
+    right: 70px;
+    top: 10px;
+  }
+}
+
+#login-container {
+  display: flex;
+}
+
+#google-login-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: white;
+  color: #333;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+#google-login-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+#google-login-btn:active {
+  transform: translateY(0);
+}
+
+#google-login-btn img {
+  width: 18px;
+  height: 18px;
+}
+
+#user-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 20px;
+  backdrop-filter: blur(10px);
+}
+
+#user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+#user-name {
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#logout-btn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+#logout-btn:hover {
+  background: rgba(255, 100, 100, 0.4);
+}
