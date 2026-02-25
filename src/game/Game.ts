@@ -61,6 +61,7 @@ export class Game {
   private buildingStartRotation = 0;
   private moveStartScreenPos: { x: number; y: number } | null = null;
   private buildingStartPos: { lng: number; lat: number } | null = null;
+  private boundUpdateGizmoPosition: (() => void) | null = null;
 
   constructor(mapManager: MapManager) {
     this.mapManager = mapManager;
@@ -573,10 +574,42 @@ export class Game {
 
     // Create rotation handle
     this.createRotationHandle();
+
+    // Add map event listeners to keep gizmo in sync with map movement
+    this.addGizmoMapListeners();
+  }
+
+  // Add map event listeners to update gizmo position on zoom/pan/rotate
+  private addGizmoMapListeners(): void {
+    const map = this.mapManager.getMap();
+
+    // Create a bound handler that we can remove later
+    this.boundUpdateGizmoPosition = () => {
+      this.updateRotationHandlePosition();
+      this.updateMoveHandlePosition();
+    };
+
+    // Listen for map movements that require gizmo updates
+    map.on('zoom', this.boundUpdateGizmoPosition);
+    map.on('move', this.boundUpdateGizmoPosition);
+    map.on('rotate', this.boundUpdateGizmoPosition);
+  }
+
+  // Remove map event listeners for gizmo
+  private removeGizmoMapListeners(): void {
+    if (!this.boundUpdateGizmoPosition) return;
+
+    const map = this.mapManager.getMap();
+    map.off('zoom', this.boundUpdateGizmoPosition);
+    map.off('move', this.boundUpdateGizmoPosition);
+    map.off('rotate', this.boundUpdateGizmoPosition);
+
+    this.boundUpdateGizmoPosition = null;
   }
 
   // Deselect building and remove rotation handle
   private deselectBuilding(): void {
+    this.removeGizmoMapListeners();
     this.selectedBuildingId = null;
     this.removeRotationHandle();
   }
