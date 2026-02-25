@@ -57,6 +57,7 @@ export type MessageHandler = {
   onResourceCollected: (resourceId: string, playerId: string) => void;
   onBuildingPlaced: (building: NetworkBuilding) => void;
   onBuildingRotated?: (buildingId: string, rotation: number) => void;
+  onBuildingMoved?: (buildingId: string, lng: number, lat: number) => void;
   onChatMessage?: (message: ChatMessage) => void;
   onSnapshot?: (snapshot: unknown) => void;
   onPositionCorrection?: PositionCorrectionCallback;
@@ -222,6 +223,13 @@ export class GeckosNetworkManager {
       }
     });
 
+    this.channel.on('building_moved', (data: Data) => {
+      const msg = data as { buildingId: string; lng: number; lat: number };
+      if (this.handlers!.onBuildingMoved) {
+        this.handlers!.onBuildingMoved(msg.buildingId, msg.lng, msg.lat);
+      }
+    });
+
     // Chat messages
     this.channel.on('chat_message', (data: Data) => {
       const msg = data as ChatMessage;
@@ -343,6 +351,10 @@ export class GeckosNetworkManager {
 
   rotateBuilding(buildingId: string, rotation: number) {
     this.channel?.emit('rotate_building', { buildingId, rotation }, { reliable: true });
+  }
+
+  moveBuilding(buildingId: string, lng: number, lat: number) {
+    this.channel?.emit('move_building', { buildingId, lng, lat }, { reliable: true });
   }
 
   setName(name: string) {

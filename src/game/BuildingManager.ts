@@ -105,6 +105,16 @@ export class BuildingManager {
     }
   }
 
+  // Move building to new location
+  moveBuilding(buildingId: string, lng: number, lat: number): void {
+    const building = this.buildings.get(buildingId);
+    if (building) {
+      building.lng = lng;
+      building.lat = lat;
+      this.updateBuildingPosition(building);
+    }
+  }
+
   // Get building at screen position (for click detection)
   getBuildingAtPosition(screenX: number, screenY: number): PlacedBuilding | null {
     for (const building of this.buildings.values()) {
@@ -131,8 +141,10 @@ export class BuildingManager {
     const scale = Math.pow(2, zoom - this.baseZoom) * 1.5;
     building.text.scale.set(scale);
 
-    // Apply rotation
-    building.text.rotation = building.rotation;
+    // Apply rotation, accounting for map bearing
+    // Map bearing is in degrees (clockwise from north), convert to radians
+    const mapBearing = this.mapManager.getBearing() * (Math.PI / 180);
+    building.text.rotation = building.rotation - mapBearing;
   }
 
   updateAllPositions(): void {

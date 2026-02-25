@@ -49,12 +49,16 @@ export class Game {
   private chatMessages: ChatMessage[] = [];
   private maxChatMessages = 50;
 
-  // Building rotation
+  // Building rotation and movement
   private selectedBuildingId: string | null = null;
   private rotationHandleEl: HTMLElement | null = null;
+  private moveHandleEl: HTMLElement | null = null;
   private isRotating = false;
+  private isMovingBuilding = false;
   private rotationStartAngle = 0;
   private buildingStartRotation = 0;
+  private moveStartScreenPos: { x: number; y: number } | null = null;
+  private buildingStartPos: { lng: number; lat: number } | null = null;
 
   constructor(mapManager: MapManager) {
     this.mapManager = mapManager;
@@ -679,6 +683,155 @@ export class Game {
       onMove(touch.clientX, touch.clientY);
     });
     document.addEventListener('touchend', onEnd);
+
+    // Create move handle (below the building)
+    this.createMoveHandle();
+  }
+
+  // Create the move handle UI (cross icon below the building)
+  private createMoveHandle(): void {
+    this.removeMoveHandle();
+
+    if (!this.selectedBuildingId || !this.buildingManager) return;
+
+    const building = this.buildingManager.getBuildings().get(this.selectedBuildingId);
+    if (!building) return;
+
+    // Create move handle element
+    const moveHandle = document.createElement('div');
+    moveHandle.id = 'move-handle';
+    moveHandle.style.cssText = `
+      position: fixed;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #4CAF50;
+      border: 2px solid white;
+      cursor: move;
+      z-index: 1000;
+      transform: translate(-50%, -50%);
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    `;
+    moveHandle.textContent = '↔';
+
+    document.body.appendChild(moveHandle);
+    this.moveHandleEl = moveHandle;
+
+    // Position the move handle
+    this.updateMoveHandlePosition();
+
+    // Add drag handlers for moving
+    let isDragging = false;
+
+    const onMoveStart = (clientX: number, clientY: number) => {
+      isDragging = true;
+      this.isMovingBuilding = true;
+      moveHandle.style.cursor = 'grabbing';
+
+      const building = this.buildingManager?.getBuildings().get(this.selectedBuildingId!);
+      if (building) {
+        this.moveStartScreenPos = { x: clientX, y: clientY };
+        this.buildingStartPos = { lng: building.lng, lat: building.lat };
+      }
+    };
+
+    const onMoveDrag = (clientX: number, clientY: number) => {
+      if (!isDragging || !this.selectedBuildingId || !this.moveStartScreenPos || !this.buildingStartPos) return;
+
+      // Calculate screen delta
+      const dx = clientX - this.moveStartScreenPos.x;
+      const dy = clientY - this.moveStartScreenPos.y;
+
+      // Convert screen delta to geo delta
+      const startScreen = this.mapManager.project({ lng: this.buildingStartPos.lng, lat: this.buildingStartPos.lat });
+      const newScreen = { x: startScreen.x + dx, y: startScreen.y + dy };
+      const newGeo = this.mapManager.unproject({ x: newScreen.x, y: newScreen.y });
+
+      // Apply position locally
+      this.buildingManager?.moveBuilding(this.selectedBuildingId, newGeo.lng, newGeo.lat);
+
+      // Update handles
+      this.updateRotationHandlePosition();
+      this.updateMoveHandlePosition();
+    };
+
+    const onMoveEnd = () => {
+      if (!isDragging) return;
+      isDragging = false;
+      this.isMovingBuilding = false;
+      moveHandle.style.cursor = 'move';
+
+      // Send final position to server
+      if (this.selectedBuildingId) {
+        const building = this.buildingManager?.getBuildings().get(this.selectedBuildingId);
+        if (building) {
+          console.log(`📍 Broadcasting move: ${building.lng.toFixed(5)}, ${building.lat.toFixed(5)}`);
+          this.network.moveBuilding(this.selectedBuildingId, building.lng, building.lat);
+        }
+      }
+
+      this.moveStartScreenPos = null;
+      this.buildingStartPos = null;
+    };
+
+    // Mouse events
+    moveHandle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      onMoveStart(e.clientX, e.clientY);
+    });
+    document.addEventListener('mousemove', (e) => onMoveDrag(e.clientX, e.clientY));
+    document.addEventListener('mouseup', onMoveEnd);
+
+    // Touch events
+    moveHandle.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      onMoveStart(touch.clientX, touch.clientY);
+    });
+    document.addEventListener('touchmove', (e) => {
+      const touch = e.touches[0];
+      onMoveDrag(touch.clientX, touch.clientY);
+    });
+    document.addEventListener('touchend', onMoveEnd);
+  }
+
+  // Update the position of the move handle (below the building)
+  private updateMoveHandlePosition(): void {
+    if (!this.moveHandleEl || !this.selectedBuildingId || !this.buildingManager) return;
+
+    const building = this.buildingManager.getBuildings().get(this.selectedBuildingId);
+    if (!building) return;
+
+    // Get building screen position
+    const screenPos = this.mapManager.project({ lng: building.lng, lat: building.lat });
+
+    // Calculate handle position below the building (rotated)
+    const zoom = this.mapManager.getZoom();
+    const scale = Math.pow(2, zoom - 16) * 1.5;
+    const handleDistance = 40 * scale;
+
+    // Account for map bearing when positioning handles
+    const mapBearing = this.mapManager.getBearing() * (Math.PI / 180);
+
+    // Handle is below the building, rotated by building rotation minus map bearing
+    const handleAngle = building.rotation - mapBearing + Math.PI / 2; // Start at bottom
+    const handleX = screenPos.x + Math.cos(handleAngle) * handleDistance;
+    const handleY = screenPos.y + Math.sin(handleAngle) * handleDistance;
+
+    this.moveHandleEl.style.left = `${handleX}px`;
+    this.moveHandleEl.style.top = `${handleY}px`;
+  }
+
+  // Remove the move handle
+  private removeMoveHandle(): void {
+    if (this.moveHandleEl) {
+      this.moveHandleEl.remove();
+      this.moveHandleEl = null;
+    }
   }
 
   // Update the position of the rotation handle
@@ -696,8 +849,11 @@ export class Game {
     const scale = Math.pow(2, zoom - 16) * 1.5;
     const handleDistance = 40 * scale; // Distance from center to handle
 
-    // Handle is above the building, rotated by building rotation
-    const handleAngle = building.rotation - Math.PI / 2; // Start at top
+    // Account for map bearing when positioning handles
+    const mapBearing = this.mapManager.getBearing() * (Math.PI / 180);
+
+    // Handle is above the building, rotated by building rotation minus map bearing
+    const handleAngle = building.rotation - mapBearing - Math.PI / 2; // Start at top
     const handleX = screenPos.x + Math.cos(handleAngle) * handleDistance;
     const handleY = screenPos.y + Math.sin(handleAngle) * handleDistance;
 
@@ -711,6 +867,7 @@ export class Game {
       this.rotationHandleEl.remove();
       this.rotationHandleEl = null;
     }
+    this.removeMoveHandle();
   }
 
   // Find a collectible resource at the given world position
@@ -953,6 +1110,14 @@ export class Game {
         onBuildingRotated: (buildingId, rotation) => {
           console.log(`🔄 Building ${buildingId} rotated to ${rotation.toFixed(2)} rad`);
           this.buildingManager?.rotateBuilding(buildingId, rotation);
+          // Update rotation handle if this is the selected building
+          if (buildingId === this.selectedBuildingId) {
+            this.updateRotationHandlePosition();
+          }
+        },
+        onBuildingMoved: (buildingId, lng, lat) => {
+          console.log(`📍 Building ${buildingId} moved to ${lng.toFixed(5)}, ${lat.toFixed(5)}`);
+          this.buildingManager?.moveBuilding(buildingId, lng, lat);
           // Update rotation handle if this is the selected building
           if (buildingId === this.selectedBuildingId) {
             this.updateRotationHandlePosition();

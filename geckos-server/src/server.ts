@@ -270,6 +270,17 @@ io.onConnection((channel: ServerChannel) => {
     }
   });
 
+  // Handle building movement (reliable)
+  channel.on('move_building', (data: Data) => {
+    const msg = data as { buildingId: string; lng: number; lat: number };
+    const building = buildings.get(msg.buildingId);
+    if (building) {
+      building.lng = msg.lng;
+      building.lat = msg.lat;
+      io.emit('building_moved', { buildingId: msg.buildingId, lng: msg.lng, lat: msg.lat }, { reliable: true });
+    }
+  });
+
   // Handle name change (reliable)
   channel.on('set_name', (data: Data) => {
     const msg = data as { name: string };

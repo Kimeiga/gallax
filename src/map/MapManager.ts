@@ -61,6 +61,10 @@ export class MapManager {
     return this.map.getZoom();
   }
 
+  getBearing(): number {
+    return this.map.getBearing();
+  }
+
   getCenter(): { lng: number; lat: number } {
     const center = this.map.getCenter();
     return { lng: center.lng, lat: center.lat };
