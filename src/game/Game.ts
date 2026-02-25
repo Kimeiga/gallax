@@ -184,6 +184,9 @@ export class Game {
     // Setup chat UI
     this.createChatUI();
 
+    // Setup mobile UI (toggle buttons, fullscreen, etc.)
+    this.createMobileUI();
+
     // Handle window resize
     window.addEventListener('resize', () => {
       this.app.renderer.resize(window.innerWidth, window.innerHeight);
@@ -864,13 +867,139 @@ export class Game {
       }
     });
 
-    // Focus chat input when pressing Enter (if not already focused)
+    // Focus chat input when pressing Enter (if not already focused on desktop)
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && document.activeElement !== input) {
+      if (e.key === 'Enter' && document.activeElement !== input && !this.isMobile()) {
         e.preventDefault();
         input.focus();
       }
     });
+
+    // On mobile, tap on chat messages to expand/collapse
+    const chatContainerEl = document.getElementById('chat-container');
+    const messagesContainer = document.getElementById('chat-messages');
+    if (chatContainerEl && messagesContainer && this.isMobile()) {
+      messagesContainer.addEventListener('click', () => {
+        chatContainerEl.classList.toggle('expanded');
+        if (chatContainerEl.classList.contains('expanded')) {
+          input.focus();
+        }
+      });
+    }
+  }
+
+  // Check if on mobile (touch device)
+  private isMobile(): boolean {
+    return window.matchMedia('(pointer: coarse)').matches;
+  }
+
+  // Create mobile UI buttons
+  private createMobileUI(): void {
+    if (!this.isMobile()) return;
+
+    const container = document.getElementById('mobile-ui-buttons');
+    if (!container) return;
+
+    // Hotbar toggle button
+    const btnHotbar = document.createElement('button');
+    btnHotbar.id = 'btn-hotbar';
+    btnHotbar.className = 'mobile-toggle-btn';
+    btnHotbar.innerHTML = '🎒';
+    btnHotbar.title = 'Toggle Inventory';
+    container.appendChild(btnHotbar);
+
+    btnHotbar.addEventListener('click', () => {
+      const hotbar = document.getElementById('inventory-hotbar');
+      if (hotbar) {
+        hotbar.classList.toggle('visible');
+        btnHotbar.classList.toggle('active', hotbar.classList.contains('visible'));
+      }
+    });
+
+    // Crafting toggle button
+    const btnCrafting = document.createElement('button');
+    btnCrafting.id = 'btn-crafting';
+    btnCrafting.className = 'mobile-toggle-btn';
+    btnCrafting.innerHTML = '🔨';
+    btnCrafting.title = 'Toggle Crafting';
+    container.appendChild(btnCrafting);
+
+    btnCrafting.addEventListener('click', () => {
+      const craftMenu = document.getElementById('crafting-menu');
+      if (craftMenu) {
+        craftMenu.classList.toggle('visible');
+        btnCrafting.classList.toggle('active', craftMenu.classList.contains('visible'));
+      }
+    });
+
+    // Name change button (uses browser prompt)
+    const btnName = document.createElement('button');
+    btnName.id = 'btn-name';
+    btnName.className = 'mobile-toggle-btn';
+    btnName.innerHTML = '✏️';
+    btnName.title = 'Change Name';
+    container.appendChild(btnName);
+
+    btnName.addEventListener('click', () => {
+      const newName = prompt('Enter your name:', this.playerName || '');
+      if (newName && newName.trim()) {
+        const name = newName.trim().substring(0, 20);
+        console.log(`📛 Changing player name to "${name}"`);
+        this.playerName = name;
+        this.player?.setName(name);
+        this.network.setName(name);
+      }
+    });
+
+    // Fullscreen toggle button
+    const btnFullscreen = document.createElement('button');
+    btnFullscreen.id = 'btn-fullscreen';
+    btnFullscreen.className = 'mobile-toggle-btn';
+    btnFullscreen.innerHTML = '⛶';
+    btnFullscreen.title = 'Toggle Fullscreen';
+    container.appendChild(btnFullscreen);
+
+    btnFullscreen.addEventListener('click', () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(err => {
+          console.log('Fullscreen error:', err);
+        });
+        btnFullscreen.innerHTML = '⛶';
+      } else {
+        document.exitFullscreen();
+        btnFullscreen.innerHTML = '⛶';
+      }
+    });
+
+    // Update coords display without emojis on mobile
+    this.updateCoordsDisplay();
+  }
+
+  // Update coords/zoom display (no emojis on mobile)
+  private updateCoordsDisplay(): void {
+    const coordsEl = document.getElementById('coords');
+    const zoomEl = document.getElementById('zoom-level');
+    if (!coordsEl || !zoomEl) return;
+
+    const updateCoords = () => {
+      const pos = this.player?.getPosition();
+      const zoom = this.mapManager.getMap().getZoom();
+      if (pos) {
+        if (this.isMobile()) {
+          coordsEl.textContent = `${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}`;
+          zoomEl.textContent = `Zoom: ${zoom.toFixed(1)}`;
+        } else {
+          coordsEl.textContent = `📍 ${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}`;
+          zoomEl.textContent = `🔍 Zoom: ${zoom.toFixed(1)}`;
+        }
+      }
+    };
+
+    // Initial update
+    updateCoords();
+
+    // Update on map move
+    this.mapManager.getMap().on('move', updateCoords);
   }
 
   // Add a chat message to the UI
