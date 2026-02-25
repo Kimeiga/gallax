@@ -874,18 +874,6 @@ export class Game {
         input.focus();
       }
     });
-
-    // On mobile, tap on chat messages to expand/collapse
-    const chatContainerEl = document.getElementById('chat-container');
-    const messagesContainer = document.getElementById('chat-messages');
-    if (chatContainerEl && messagesContainer && this.isMobile()) {
-      messagesContainer.addEventListener('click', () => {
-        chatContainerEl.classList.toggle('expanded');
-        if (chatContainerEl.classList.contains('expanded')) {
-          input.focus();
-        }
-      });
-    }
   }
 
   // Check if on mobile (touch device)
@@ -951,7 +939,7 @@ export class Game {
       }
     });
 
-    // Fullscreen toggle button
+    // Fullscreen toggle button (top right)
     const btnFullscreen = document.createElement('button');
     btnFullscreen.id = 'btn-fullscreen';
     btnFullscreen.className = 'mobile-toggle-btn';
@@ -964,10 +952,30 @@ export class Game {
         document.documentElement.requestFullscreen().catch(err => {
           console.log('Fullscreen error:', err);
         });
-        btnFullscreen.innerHTML = '⛶';
       } else {
         document.exitFullscreen();
-        btnFullscreen.innerHTML = '⛶';
+      }
+    });
+
+    // Chat toggle button (bottom right)
+    const btnChat = document.createElement('button');
+    btnChat.id = 'btn-chat';
+    btnChat.className = 'mobile-toggle-btn';
+    btnChat.innerHTML = '💬';
+    btnChat.title = 'Toggle Chat';
+    container.appendChild(btnChat);
+
+    const chatContainer = document.getElementById('chat-container');
+    const chatInput = document.getElementById('chat-input') as HTMLInputElement;
+
+    btnChat.addEventListener('click', () => {
+      if (chatContainer) {
+        chatContainer.classList.toggle('expanded');
+        btnChat.classList.toggle('active', chatContainer.classList.contains('expanded'));
+        // Focus input when opening chat
+        if (chatContainer.classList.contains('expanded') && chatInput) {
+          chatInput.focus();
+        }
       }
     });
 

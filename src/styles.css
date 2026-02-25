@@ -484,29 +484,26 @@ html, body {
 
 /* Touch devices - collapsible chat */
 @media (pointer: coarse) {
+  /* Hide chat by default on mobile - show via button */
   #chat-container {
-    bottom: 10px;
-    width: calc(100% - 20px);
-    max-width: 400px;
-  }
-
-  #chat-messages {
-    height: 60px;
-    cursor: pointer;
-  }
-
-  /* Hide composer by default on mobile */
-  #chat-input-row {
     display: none;
+    bottom: 70px;
+    left: 70px; /* Left padding to avoid overlap with bottom-left buttons */
+    width: calc(100% - 90px); /* Account for left padding + right margin */
+    max-width: 350px;
   }
 
-  /* Show composer when chat is expanded */
-  #chat-container.expanded #chat-input-row {
+  /* Show chat when expanded */
+  #chat-container.expanded {
     display: flex;
   }
 
-  #chat-container.expanded #chat-messages {
+  #chat-messages {
     height: 100px;
+  }
+
+  #chat-input-row {
+    display: flex;
   }
 }
 
@@ -562,8 +559,14 @@ html, body {
   left: 10px;
 }
 
-/* Bottom right buttons */
+/* Top right button */
 #btn-fullscreen {
+  top: 10px;
+  right: 10px;
+}
+
+/* Bottom right chat button */
+#btn-chat {
   bottom: 10px;
   right: 10px;
 }
