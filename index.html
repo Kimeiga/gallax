@@ -31,9 +31,31 @@
     <div id="user-container" style="display: none;">
       <img id="user-avatar" src="" alt="Avatar">
       <span id="user-name"></span>
+      <div id="coin-display">
+        <span class="coin-icon">💰</span>
+        <span id="coin-count">0</span>
+      </div>
       <button id="logout-btn">Logout</button>
     </div>
   </div>
+  <!-- Mission UI -->
+  <div id="mission-ui" style="display: none;">
+    <button id="mission-board-btn">🎯 View Missions</button>
+  </div>
+  <div id="mission-board" style="display: none;">
+    <div class="mission-board-header">
+      <h2 id="mission-board-title">Missions</h2>
+      <button id="close-mission-board">✕</button>
+    </div>
+    <div class="mission-tabs">
+      <button class="mission-tab active" data-tab="available">Available</button>
+      <button class="mission-tab" data-tab="active">Active</button>
+      <button class="mission-tab" data-tab="completed">Completed</button>
+    </div>
+    <div id="mission-list"></div>
+  </div>
+  <!-- Active Missions Tracker -->
+  <div id="active-missions-tracker" style="display: none;"></div>
   <!-- Mobile UI buttons -->
   <div id="mobile-ui-buttons"></div>
   <script type="module" src="/src/main.ts"></script>

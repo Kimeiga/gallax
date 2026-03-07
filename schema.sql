@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS players (
   name TEXT NOT NULL,
   avatar_url TEXT,
   resources TEXT DEFAULT '{"wood":0,"stone":0,"fish":0,"gems":0,"shells":0,"herbs":0}',
+  coins INTEGER DEFAULT 0,          -- Mission rewards currency
   lng REAL DEFAULT -73.965,
   lat REAL DEFAULT 40.782,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -37,4 +38,45 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS idx_sessions_player ON sessions(player_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+
+-- Public spaces (landmarks with missions)
+CREATE TABLE IF NOT EXISTS public_spaces (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  lng REAL NOT NULL,
+  lat REAL NOT NULL,
+  radius REAL DEFAULT 50, -- meters
+  description TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Missions available at public spaces
+CREATE TABLE IF NOT EXISTS missions (
+  id TEXT PRIMARY KEY,
+  space_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  type TEXT NOT NULL, -- 'collect', 'visit', 'build', 'social', 'distance'
+  objective TEXT NOT NULL, -- JSON: {"type": "collect", "resource": "wood", "amount": 10}
+  reward_coins INTEGER NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (space_id) REFERENCES public_spaces(id) ON DELETE CASCADE
+);
+
+-- Player missions (active and completed)
+CREATE TABLE IF NOT EXISTS player_missions (
+  id TEXT PRIMARY KEY,
+  player_id TEXT NOT NULL,
+  mission_id TEXT NOT NULL,
+  status TEXT DEFAULT 'active', -- 'active', 'completed', 'claimed'
+  progress TEXT DEFAULT '{}', -- JSON: {"collected": 5, "target": 10}
+  started_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT,
+  claimed_at TEXT,
+  FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE,
+  FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_player_missions_player ON player_missions(player_id);
+CREATE INDEX IF NOT EXISTS idx_player_missions_status ON player_missions(status);
 
