@@ -16,6 +16,7 @@ import { authService } from '../auth/AuthService';
 import { buildingsAPI } from '../api/BuildingsAPI';
 import { PublicSpacesManager } from './PublicSpacesManager';
 import { PublicSpace } from '../api/MissionsAPI';
+import { notificationSystem } from './NotificationSystem';
 
 export class Game {
   private app: Application;
@@ -580,6 +581,17 @@ export class Game {
       this.network.placeBuilding(buildingType, lng, lat);
       console.log(`🏗️ Placed ${BUILDING_DEFS[buildingType].emoji} ${BUILDING_DEFS[buildingType].name}!`);
 
+      // Award XP for placing building
+      const progression = (window as any).progression;
+      if (progression) {
+        const result = progression.addXP(25);
+        notificationSystem.showXP(25);
+        if (result.leveledUp) {
+          notificationSystem.showLevelUp(result.newLevel);
+        }
+        progression.incrementBuildingsPlaced();
+      }
+
       // If logged in, persist to D1
       if (authService.isAuthenticated()) {
         buildingsAPI.create({ id: buildingId, type: buildingType, lng, lat, rotation: 0 })
@@ -1087,6 +1099,17 @@ export class Game {
     if (resourceType) {
       this.inventory.add(resourceType);
       console.log(`✨ Collected ${RESOURCE_INFO[resourceType].emoji} ${RESOURCE_INFO[resourceType].name}!`);
+
+      // Award XP for collecting resource
+      const progression = (window as any).progression;
+      if (progression) {
+        const result = progression.addXP(5);
+        notificationSystem.showXP(5);
+        if (result.leveledUp) {
+          notificationSystem.showLevelUp(result.newLevel);
+        }
+        progression.incrementResourcesCollected();
+      }
 
       // Show floating text feedback
       this.showCollectFeedback(target.lng, target.lat, RESOURCE_INFO[resourceType].emoji);

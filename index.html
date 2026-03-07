@@ -20,6 +20,36 @@
     <div id="coords"></div>
     <div id="zoom-level"></div>
   </div>
+  <!-- Player Stats Panel -->
+  <div id="player-stats" style="display: none;">
+    <div class="stat-row">
+      <span class="stat-label">⭐ Level</span>
+      <span class="stat-value" id="player-level">1</span>
+    </div>
+    <div class="xp-bar">
+      <div class="xp-bar-fill" id="xp-bar-fill" style="width: 0%"></div>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">XP</span>
+      <span class="stat-value"><span id="player-xp">0</span> / <span id="player-xp-next">100</span></span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">💰 Coins</span>
+      <span class="stat-value" id="player-coins-stat">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">🌳 Resources</span>
+      <span class="stat-value" id="player-resources">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">🏠 Buildings</span>
+      <span class="stat-value" id="player-buildings">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">🎯 Missions</span>
+      <span class="stat-value" id="player-missions">0</span>
+    </div>
+  </div>
   <!-- Login/User UI -->
   <div id="auth-ui">
     <div id="login-container">

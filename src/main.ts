@@ -3,6 +3,8 @@ import { MapManager } from './map/MapManager';
 import { Game } from './game/Game';
 import { authService, User } from './auth/AuthService';
 import { missionsAPI, PublicSpace, Mission, PlayerMission } from './api/MissionsAPI';
+import { ProgressionSystem } from './game/ProgressionSystem';
+import { notificationSystem } from './game/NotificationSystem';
 
 // Set default texture scaling to nearest-neighbor for crisp pixel art
 TextureStyle.defaultOptions.scaleMode = 'nearest';
@@ -266,6 +268,16 @@ async function main() {
   // Initialize map
   const mapManager = new MapManager('map', MAPBOX_TOKEN);
 
+  // Initialize progression system
+  const progression = new ProgressionSystem();
+  (window as any).progression = progression;
+
+  // Initialize notification system
+  notificationSystem.init();
+
+  // Setup player stats UI
+  setupPlayerStatsUI(progression);
+
   // Wait for map to load
   mapManager.onLoad(async () => {
     console.log('Map loaded!');
@@ -276,6 +288,58 @@ async function main() {
 
     console.log('Game initialized! Use WASD or arrow keys to move.');
   });
+}
+
+function setupPlayerStatsUI(progression: ProgressionSystem) {
+  const statsPanel = document.getElementById('player-stats');
+  if (!statsPanel) return;
+
+  // Show stats panel when logged in
+  authService.onAuthChange((user) => {
+    if (user) {
+      statsPanel.style.display = 'block';
+      updatePlayerStatsDisplay(progression);
+    } else {
+      statsPanel.style.display = 'none';
+    }
+  });
+
+  // Update stats display every second
+  let currentUser: User | null = null;
+  authService.onAuthChange((user) => {
+    currentUser = user;
+  });
+
+  setInterval(() => {
+    if (currentUser) {
+      updatePlayerStatsDisplay(progression);
+    }
+  }, 1000);
+}
+
+function updatePlayerStatsDisplay(progression: ProgressionSystem) {
+  const stats = progression.getStats();
+
+  const levelEl = document.getElementById('player-level');
+  const xpEl = document.getElementById('player-xp');
+  const xpNextEl = document.getElementById('player-xp-next');
+  const xpBarFill = document.getElementById('xp-bar-fill');
+  const coinsEl = document.getElementById('player-coins-stat');
+  const resourcesEl = document.getElementById('player-resources');
+  const buildingsEl = document.getElementById('player-buildings');
+  const missionsEl = document.getElementById('player-missions');
+
+  if (levelEl) levelEl.textContent = stats.level.toString();
+  if (xpEl) xpEl.textContent = stats.xp.toString();
+  if (xpNextEl) xpNextEl.textContent = stats.xpToNextLevel.toString();
+  if (xpBarFill) {
+    const percent = (stats.xp / stats.xpToNextLevel) * 100;
+    xpBarFill.style.width = `${percent}%`;
+  }
+  if (coinsEl) coinsEl.textContent = stats.totalCoins.toString();
+  if (resourcesEl) resourcesEl.textContent = stats.totalResourcesCollected.toString();
+  if (buildingsEl) buildingsEl.textContent = stats.totalBuildingsPlaced.toString();
+  if (missionsEl) missionsEl.textContent = stats.totalMissionsCompleted.toString();
 }
 
 main().catch(console.error);
