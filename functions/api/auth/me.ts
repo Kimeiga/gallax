@@ -53,9 +53,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     
     // Get player info
     const player = await env.DB.prepare(`
-      SELECT id, email, name, avatar_url, resources, lng, lat, created_at
+      SELECT id, email, name, avatar_url, resources, coins, lng, lat, created_at
       FROM players WHERE id = ?
-    `).bind(session.player_id).first<Player>();
+    `).bind(session.player_id).first<Player & { coins: number }>();
     
     if (!player) {
       return Response.json({ error: 'Player not found' }, { status: 404 });
@@ -67,6 +67,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       name: player.name,
       avatarUrl: player.avatar_url,
       resources: JSON.parse(player.resources || '{}'),
+      coins: player.coins || 0,
       lng: player.lng,
       lat: player.lat,
       createdAt: player.created_at,
