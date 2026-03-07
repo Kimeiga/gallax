@@ -14,6 +14,8 @@ import { CraftingSystem } from './Crafting';
 import { getPerformanceManager, PerformanceManager } from './PerformanceManager';
 import { authService } from '../auth/AuthService';
 import { buildingsAPI } from '../api/BuildingsAPI';
+import { PublicSpacesManager } from './PublicSpacesManager';
+import { PublicSpace } from '../api/MissionsAPI';
 
 export class Game {
   private app: Application;
@@ -32,6 +34,7 @@ export class Game {
   private network: NetworkManager;
   private otherPlayers: OtherPlayersManager | null = null;
   private buildingManager: BuildingManager | null = null;
+  private publicSpacesManager: PublicSpacesManager | null = null;
   private crafting: CraftingSystem;
   private collectedResourceIds: Set<string> = new Set(); // Track globally collected resources
   private playerSpriteNum: number;
@@ -136,6 +139,10 @@ export class Game {
     this.otherPlayers = new OtherPlayersManager(this.mapManager, this.app);
     this.buildingManager = new BuildingManager(this.mapManager, this.app);
 
+    // Initialize public spaces manager
+    this.publicSpacesManager = new PublicSpacesManager(this.mapManager, this.app);
+    await this.publicSpacesManager.loadPublicSpaces();
+
     // Wait for map to load style, then spawn everything
     this.mapManager.onLoad(() => {
       console.log('Map loaded, spawning all entities...');
@@ -154,6 +161,7 @@ export class Game {
       this.terrainEntityManager?.updateAllPositions();
       this.otherPlayers?.updateAllPositions();
       this.buildingManager?.updateAllPositions();
+      this.publicSpacesManager?.updateAllPositions();
     });
 
     // Respawn entities when moving to new areas (performance-aware)
@@ -398,6 +406,14 @@ export class Game {
     if (this.player && coordsEl) {
       const pos = this.player.getPosition();
       coordsEl.textContent = `📍 ${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}`;
+
+      // Check proximity to public spaces for missions
+      if (this.publicSpacesManager) {
+        const nearbySpace = this.publicSpacesManager.checkProximity(pos.lng, pos.lat);
+        if ((window as any).setCurrentMissionSpace) {
+          (window as any).setCurrentMissionSpace(nearbySpace);
+        }
+      }
     }
 
     if (zoomEl) {
