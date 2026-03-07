@@ -1,10 +1,10 @@
 -- Seed public spaces (NYC landmarks)
 INSERT OR IGNORE INTO public_spaces (id, name, lng, lat, radius, description) VALUES
-  ('met', 'The Metropolitan Museum of Art', -73.9632, 40.7794, 50, 'World-renowned art museum on Museum Mile'),
-  ('times-square', 'Times Square', -73.9855, 40.7580, 50, 'The crossroads of the world'),
-  ('central-park', 'Central Park', -73.9654, 40.7829, 100, 'NYC''s iconic urban park'),
-  ('brooklyn-bridge', 'Brooklyn Bridge', -73.9969, 40.7061, 50, 'Historic suspension bridge'),
-  ('statue-liberty', 'Statue of Liberty', -74.0445, 40.6892, 50, 'Symbol of freedom and democracy');
+  ('met', 'The Metropolitan Museum of Art', -73.9632, 40.7794, 200, 'World-renowned art museum on Museum Mile'),
+  ('times-square', 'Times Square', -73.9855, 40.7580, 200, 'The crossroads of the world'),
+  ('central-park', 'Central Park', -73.9654, 40.7829, 200, 'NYC''s iconic urban park'),
+  ('brooklyn-bridge', 'Brooklyn Bridge', -73.9969, 40.7061, 200, 'Historic suspension bridge'),
+  ('statue-liberty', 'Statue of Liberty', -74.0445, 40.6892, 200, 'Symbol of freedom and democracy');
 
 -- Seed missions for The Met
 INSERT OR IGNORE INTO missions (id, space_id, title, description, type, objective, reward_coins) VALUES

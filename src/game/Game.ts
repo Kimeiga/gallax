@@ -411,6 +411,12 @@ export class Game {
       // Check proximity to public spaces for missions
       if (this.publicSpacesManager) {
         const nearbySpace = this.publicSpacesManager.checkProximity(pos.lng, pos.lat);
+
+        // Debug logging
+        if (nearbySpace) {
+          console.log('Near public space:', nearbySpace.name);
+        }
+
         if ((window as any).setCurrentMissionSpace) {
           (window as any).setCurrentMissionSpace(nearbySpace);
         }
