@@ -156,11 +156,21 @@ function setupMissionUI() {
     // Add event listeners
     missionList.querySelectorAll('.mission-btn-primary').forEach(btn => {
       btn.addEventListener('click', async (e) => {
-        const missionId = (e.target as HTMLElement).getAttribute('data-mission-id');
+        const target = e.target as HTMLButtonElement;
+        const missionId = target.getAttribute('data-mission-id');
         if (missionId) {
+          // Disable button and show loading state
+          target.disabled = true;
+          target.textContent = 'Accepting...';
+
           const success = await missionsAPI.acceptMission(missionId);
           if (success) {
+            notificationSystem.show('✅ Mission Accepted!', 'success');
             await loadMissions();
+          } else {
+            notificationSystem.show('❌ Failed to accept mission', 'error');
+            target.disabled = false;
+            target.textContent = 'Accept Mission';
           }
         }
       });

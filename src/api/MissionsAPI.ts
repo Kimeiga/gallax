@@ -60,7 +60,11 @@ class MissionsAPI {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ missionId }),
     });
-    if (!res.ok) return false;
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ error: 'Unknown error' }));
+      console.error('Failed to accept mission:', res.status, errorData);
+      return false;
+    }
     const data = await res.json();
     return data.success;
   }
