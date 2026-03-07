@@ -1406,3 +1406,43 @@ button:active:not(:disabled) {
     opacity: 1;
   }
 }
+
+
+/* Leaderboard Tabs */
+.leaderboard-tab {
+  flex: 1;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: white;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.leaderboard-tab:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.leaderboard-tab.active {
+  background: rgba(255, 255, 255, 0.3);
+  font-weight: bold;
+}
+
+/* Weather Indicator */
+#weather-indicator {
+  animation: fadeIn 0.5s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

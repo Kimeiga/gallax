@@ -309,6 +309,18 @@ async function main() {
   const dailyRewards = new DailyRewardSystem();
   (window as any).dailyRewards = dailyRewards;
 
+  // Initialize weather system
+  const { weatherSystem } = await import('./game/WeatherSystem');
+  (window as any).weatherSystem = weatherSystem;
+
+  // Initialize resource production system
+  const { resourceProductionSystem } = await import('./game/ResourceProductionSystem');
+  (window as any).resourceProductionSystem = resourceProductionSystem;
+
+  // Initialize leaderboard system
+  const { leaderboardSystem } = await import('./game/LeaderboardSystem');
+  (window as any).leaderboardSystem = leaderboardSystem;
+
   // Setup player stats UI
   setupPlayerStatsUI(progression);
 
@@ -317,6 +329,12 @@ async function main() {
 
   // Setup daily rewards UI
   setupDailyRewardsUI(dailyRewards, progression);
+
+  // Setup weather UI
+  setupWeatherUI();
+
+  // Setup leaderboard UI
+  setupLeaderboardUI();
 
   // Wait for map to load
   mapManager.onLoad(async () => {
@@ -503,6 +521,171 @@ function setupDailyRewardsUI(dailyRewards: DailyRewardSystem, progression: Progr
   closeBtn.addEventListener('click', () => {
     modal.style.display = 'none';
   });
+}
+
+function setupWeatherUI(): void {
+  // Create weather indicator in top-right corner
+  const weatherIndicator = document.createElement('div');
+  weatherIndicator.id = 'weather-indicator';
+  weatherIndicator.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 10px 15px;
+    border-radius: 8px;
+    font-size: 14px;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    backdrop-filter: blur(10px);
+  `;
+  document.body.appendChild(weatherIndicator);
+
+  // Update weather display
+  function updateWeatherDisplay() {
+    const weatherSystem = (window as any).weatherSystem;
+    if (!weatherSystem) return;
+
+    const weather = weatherSystem.getCurrentWeather();
+    weatherIndicator.innerHTML = `
+      <span style="font-size: 20px;">${weather.emoji}</span>
+      <div>
+        <div style="font-weight: bold;">${weather.name}</div>
+        <div style="font-size: 11px; opacity: 0.8;">${weather.description}</div>
+      </div>
+    `;
+  }
+
+  updateWeatherDisplay();
+  setInterval(updateWeatherDisplay, 5000);
+}
+
+function setupLeaderboardUI(): void {
+  // Create leaderboard button
+  const leaderboardBtn = document.createElement('button');
+  leaderboardBtn.id = 'leaderboard-btn';
+  leaderboardBtn.innerHTML = '🏆';
+  leaderboardBtn.title = 'Leaderboard';
+  leaderboardBtn.style.cssText = `
+    position: fixed;
+    top: 20px;
+    left: 280px;
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    border-radius: 50%;
+    font-size: 20px;
+    cursor: pointer;
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    transition: transform 0.2s;
+  `;
+  leaderboardBtn.addEventListener('mouseenter', () => {
+    leaderboardBtn.style.transform = 'scale(1.1)';
+  });
+  leaderboardBtn.addEventListener('mouseleave', () => {
+    leaderboardBtn.style.transform = 'scale(1)';
+  });
+  document.body.appendChild(leaderboardBtn);
+
+  // Create leaderboard panel
+  const leaderboardPanel = document.createElement('div');
+  leaderboardPanel.id = 'leaderboard-panel';
+  leaderboardPanel.style.cssText = `
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 90%;
+    max-width: 500px;
+    max-height: 80vh;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 16px;
+    padding: 20px;
+    z-index: 10001;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  `;
+  leaderboardPanel.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <h2 style="margin: 0; color: white;">🏆 Leaderboard</h2>
+      <button id="close-leaderboard" style="background: rgba(255,255,255,0.2); border: none; color: white; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; font-size: 18px;">×</button>
+    </div>
+    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+      <button class="leaderboard-tab active" data-type="level">Level</button>
+      <button class="leaderboard-tab" data-type="coins">Coins</button>
+      <button class="leaderboard-tab" data-type="resources">Resources</button>
+    </div>
+    <div id="leaderboard-list" style="background: rgba(0,0,0,0.3); border-radius: 8px; padding: 10px;"></div>
+    <div id="player-rank" style="margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 8px; color: white; text-align: center;"></div>
+  `;
+  document.body.appendChild(leaderboardPanel);
+
+  let currentType = 'level';
+
+  // Tab switching
+  leaderboardPanel.querySelectorAll('.leaderboard-tab').forEach(tab => {
+    tab.addEventListener('click', async () => {
+      leaderboardPanel.querySelectorAll('.leaderboard-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      currentType = tab.getAttribute('data-type') || 'level';
+      await updateLeaderboard();
+    });
+  });
+
+  // Open/close
+  leaderboardBtn.addEventListener('click', async () => {
+    leaderboardPanel.style.display = 'block';
+    await updateLeaderboard();
+  });
+
+  const closeBtn = leaderboardPanel.querySelector('#close-leaderboard');
+  closeBtn?.addEventListener('click', () => {
+    leaderboardPanel.style.display = 'none';
+  });
+
+  async function updateLeaderboard() {
+    const leaderboardSystem = (window as any).leaderboardSystem;
+    if (!leaderboardSystem) return;
+
+    const list = document.getElementById('leaderboard-list');
+    const rankEl = document.getElementById('player-rank');
+    if (!list) return;
+
+    list.innerHTML = '<div style="color: white; text-align: center;">Loading...</div>';
+
+    const [entries, playerRank] = await Promise.all([
+      leaderboardSystem.getLeaderboard(currentType, 10),
+      leaderboardSystem.getPlayerRank(currentType)
+    ]);
+
+    list.innerHTML = entries.map((entry: any, index: number) => `
+      <div style="display: flex; justify-content: space-between; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 6px; margin-bottom: 8px; color: white;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-weight: bold; font-size: 18px;">${index + 1}</span>
+          <div>
+            <div style="font-weight: bold;">${entry.username || 'Player'}</div>
+            <div style="font-size: 12px; opacity: 0.8;">Level ${entry.level}</div>
+          </div>
+        </div>
+        <div style="font-weight: bold; font-size: 18px;">
+          ${currentType === 'level' ? `Lvl ${entry.level}` :
+            currentType === 'coins' ? `${entry.total_coins} 💰` :
+            currentType === 'resources' ? `${entry.total_resources_collected} 🌳` :
+            `${entry.total_buildings_placed} 🏗️`}
+        </div>
+      </div>
+    `).join('');
+
+    if (rankEl && playerRank) {
+      rankEl.innerHTML = `Your Rank: #${playerRank}`;
+    }
+  }
 }
 
 main().catch(console.error);
