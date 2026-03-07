@@ -115,8 +115,22 @@ function setupMissionUI() {
           missionList.innerHTML = '<div style="color: rgba(255,255,255,0.6); text-align: center;">No public space nearby</div>';
           return;
         }
-        const missions = await missionsAPI.getAvailableMissions(currentSpace.id);
-        renderAvailableMissions(missions);
+
+        // Get both available missions and player's active missions
+        const [allMissions, playerMissions] = await Promise.all([
+          missionsAPI.getAvailableMissions(currentSpace.id),
+          missionsAPI.getPlayerMissions()
+        ]);
+
+        // Filter out missions that are already accepted (active or completed)
+        const acceptedMissionIds = new Set(
+          playerMissions
+            .filter(pm => pm.status === 'active' || pm.status === 'completed')
+            .map(pm => pm.mission_id)
+        );
+
+        const availableMissions = allMissions.filter(m => !acceptedMissionIds.has(m.id));
+        renderAvailableMissions(availableMissions);
       } else {
         const playerMissions = await missionsAPI.getPlayerMissions();
         const filtered = playerMissions.filter(m => {
