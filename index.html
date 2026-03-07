@@ -65,8 +65,51 @@
         <span class="coin-icon">💰</span>
         <span id="coin-count">0</span>
       </div>
+      <button id="achievements-btn" title="View Achievements">🏆</button>
       <button id="logout-btn">Logout</button>
     </div>
+  </div>
+  <!-- Daily Reward Modal -->
+  <div id="daily-reward-modal" style="display: none;">
+    <div class="modal-content">
+      <h2>🎁 Daily Login Reward!</h2>
+      <div id="daily-reward-content">
+        <div class="streak-display">
+          <span class="streak-icon">🔥</span>
+          <span id="streak-count">0</span>
+          <span class="streak-label">Day Streak</span>
+        </div>
+        <div class="reward-display">
+          <div class="reward-item">
+            <span class="reward-icon">💰</span>
+            <span id="reward-coins">0</span>
+            <span class="reward-label">Coins</span>
+          </div>
+          <div class="reward-item">
+            <span class="reward-icon">⭐</span>
+            <span id="reward-xp">0</span>
+            <span class="reward-label">XP</span>
+          </div>
+        </div>
+        <div id="reward-bonus" style="display: none;"></div>
+      </div>
+      <button id="claim-reward-btn" class="primary-btn">Claim Reward</button>
+      <button id="close-daily-reward" class="secondary-btn">Close</button>
+    </div>
+  </div>
+  <!-- Achievements Panel -->
+  <div id="achievements-panel" style="display: none;">
+    <div class="panel-header">
+      <h2>🏆 Achievements</h2>
+      <div class="achievement-progress">
+        <span id="achievement-count">0/0</span>
+        <div class="progress-bar">
+          <div class="progress-fill" id="achievement-progress-fill"></div>
+        </div>
+      </div>
+      <button id="close-achievements">✕</button>
+    </div>
+    <div id="achievements-list"></div>
   </div>
   <!-- Mission UI -->
   <div id="mission-ui" style="display: none;">

@@ -5,6 +5,8 @@ import { authService, User } from './auth/AuthService';
 import { missionsAPI, PublicSpace, Mission, PlayerMission } from './api/MissionsAPI';
 import { ProgressionSystem } from './game/ProgressionSystem';
 import { notificationSystem } from './game/NotificationSystem';
+import { AchievementSystem } from './game/AchievementSystem';
+import { DailyRewardSystem } from './game/DailyRewards';
 
 // Set default texture scaling to nearest-neighbor for crisp pixel art
 TextureStyle.defaultOptions.scaleMode = 'nearest';
@@ -275,8 +277,22 @@ async function main() {
   // Initialize notification system
   notificationSystem.init();
 
+  // Initialize achievement system
+  const achievements = new AchievementSystem();
+  (window as any).achievements = achievements;
+
+  // Initialize daily rewards
+  const dailyRewards = new DailyRewardSystem();
+  (window as any).dailyRewards = dailyRewards;
+
   // Setup player stats UI
   setupPlayerStatsUI(progression);
+
+  // Setup achievements UI
+  setupAchievementsUI(achievements, progression);
+
+  // Setup daily rewards UI
+  setupDailyRewardsUI(dailyRewards, progression);
 
   // Wait for map to load
   mapManager.onLoad(async () => {
@@ -340,6 +356,129 @@ function updatePlayerStatsDisplay(progression: ProgressionSystem) {
   if (resourcesEl) resourcesEl.textContent = stats.totalResourcesCollected.toString();
   if (buildingsEl) buildingsEl.textContent = stats.totalBuildingsPlaced.toString();
   if (missionsEl) missionsEl.textContent = stats.totalMissionsCompleted.toString();
+}
+
+function setupAchievementsUI(achievements: AchievementSystem, progression: ProgressionSystem): void {
+  const achievementsBtn = document.getElementById('achievements-btn');
+  const achievementsPanel = document.getElementById('achievements-panel');
+  const closeBtn = document.getElementById('close-achievements');
+  const achievementsList = document.getElementById('achievements-list');
+  const achievementCount = document.getElementById('achievement-count');
+  const achievementProgressFill = document.getElementById('achievement-progress-fill');
+
+  if (!achievementsBtn || !achievementsPanel || !closeBtn || !achievementsList) return;
+
+  // Open achievements panel
+  achievementsBtn.addEventListener('click', () => {
+    achievementsPanel.style.display = 'block';
+    updateAchievementsList();
+  });
+
+  // Close achievements panel
+  closeBtn.addEventListener('click', () => {
+    achievementsPanel.style.display = 'none';
+  });
+
+  function updateAchievementsList(): void {
+    const allAchievements = achievements.getAchievements();
+    achievementsList!.innerHTML = '';
+
+    allAchievements.forEach(ach => {
+      const item = document.createElement('div');
+      item.className = `achievement-item ${ach.unlocked ? 'unlocked' : 'locked'}`;
+
+      item.innerHTML = `
+        <div class="achievement-icon">${ach.icon}</div>
+        <div class="achievement-info">
+          <div class="achievement-name">${ach.name}</div>
+          <div class="achievement-description">${ach.description}</div>
+          <div class="achievement-reward">
+            <span>💰 ${ach.coinReward}</span>
+            <span>⭐ ${ach.xpReward} XP</span>
+          </div>
+        </div>
+        ${ach.unlocked ? '<div class="achievement-unlocked-badge">Unlocked</div>' : ''}
+      `;
+
+      achievementsList!.appendChild(item);
+    });
+
+    // Update progress
+    if (achievementCount) {
+      achievementCount.textContent = `${achievements.getUnlockedCount()}/${achievements.getTotalCount()}`;
+    }
+    if (achievementProgressFill) {
+      achievementProgressFill.style.width = `${achievements.getProgress()}%`;
+    }
+  }
+
+  // Check achievements periodically
+  setInterval(() => {
+    const stats = progression.getStats();
+    const newAchievements = achievements.checkAchievements({
+      resources: stats.totalResourcesCollected,
+      buildings: stats.totalBuildingsPlaced,
+      missions: stats.totalMissionsCompleted,
+      level: stats.level,
+      distance: 0, // TODO: Track distance
+      coins: stats.totalCoins,
+    });
+
+    // Show notifications for new achievements
+    newAchievements.forEach(ach => {
+      notificationSystem.show(`🏆 Achievement Unlocked: ${ach.name}!`, 'levelup');
+      progression.addXP(ach.xpReward);
+      // TODO: Add coins to player account
+    });
+  }, 2000);
+}
+
+function setupDailyRewardsUI(dailyRewards: DailyRewardSystem, progression: ProgressionSystem): void {
+  const modal = document.getElementById('daily-reward-modal');
+  const claimBtn = document.getElementById('claim-reward-btn');
+  const closeBtn = document.getElementById('close-daily-reward');
+  const streakCount = document.getElementById('streak-count');
+  const rewardCoins = document.getElementById('reward-coins');
+  const rewardXP = document.getElementById('reward-xp');
+  const rewardBonus = document.getElementById('reward-bonus');
+
+  if (!modal || !claimBtn || !closeBtn) return;
+
+  // Check if user can claim daily reward
+  if (dailyRewards.canClaimToday()) {
+    // Show modal after a short delay
+    setTimeout(() => {
+      const nextReward = dailyRewards.getNextReward();
+      if (streakCount) streakCount.textContent = nextReward.day.toString();
+      if (rewardCoins) rewardCoins.textContent = nextReward.coins.toString();
+      if (rewardXP) rewardXP.textContent = nextReward.xp.toString();
+
+      if (nextReward.bonus && rewardBonus) {
+        rewardBonus.textContent = nextReward.bonus;
+        rewardBonus.style.display = 'block';
+      } else if (rewardBonus) {
+        rewardBonus.style.display = 'none';
+      }
+
+      modal.style.display = 'flex';
+    }, 2000);
+  }
+
+  // Claim reward
+  claimBtn.addEventListener('click', () => {
+    const reward = dailyRewards.claimDailyReward();
+    if (reward) {
+      progression.addXP(reward.xp);
+      notificationSystem.show(`🎁 Daily Reward: +${reward.coins} coins, +${reward.xp} XP!`, 'coin');
+      // TODO: Add coins to player account
+      modal.style.display = 'none';
+    }
+  });
+
+  // Close modal
+  closeBtn.addEventListener('click', () => {
+    modal.style.display = 'none';
+  });
 }
 
 main().catch(console.error);
