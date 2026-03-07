@@ -1,4 +1,4 @@
-import { getSessionUser } from '../../lib/session';
+import { getSessionUser } from '../auth/session';
 
 interface Env {
   DB: D1Database;
@@ -12,7 +12,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
   try {
     // Get user from session
-    const user = await getSessionUser(request, env.SESSION_SECRET);
+    const user = await getSessionUser(context);
     if (!user) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
