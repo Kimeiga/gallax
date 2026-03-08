@@ -154,6 +154,8 @@ function setupMissionUI() {
       return;
     }
 
+    const isLoggedIn = authService.isAuthenticated();
+
     missionList.innerHTML = missions.map(mission => `
       <div class="mission-card">
         <div class="mission-card-header">
@@ -162,33 +164,50 @@ function setupMissionUI() {
         </div>
         <p class="mission-description">${mission.description}</p>
         <div class="mission-actions">
-          <button class="mission-btn mission-btn-primary" data-mission-id="${mission.id}">Accept Mission</button>
+          ${isLoggedIn
+            ? `<button class="mission-btn mission-btn-primary" data-mission-id="${mission.id}">Accept Mission</button>`
+            : `<button class="mission-btn mission-btn-secondary" data-login-required="true">Login to Accept</button>`
+          }
         </div>
       </div>
     `).join('');
 
-    // Add event listeners
-    missionList.querySelectorAll('.mission-btn-primary').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        const target = e.target as HTMLButtonElement;
-        const missionId = target.getAttribute('data-mission-id');
-        if (missionId) {
-          // Disable button and show loading state
-          target.disabled = true;
-          target.textContent = 'Accepting...';
+    if (isLoggedIn) {
+      // Add event listeners for accept buttons
+      missionList.querySelectorAll('.mission-btn-primary').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const target = e.target as HTMLButtonElement;
+          const missionId = target.getAttribute('data-mission-id');
+          if (missionId) {
+            // Disable button and show loading state
+            target.disabled = true;
+            target.textContent = 'Accepting...';
 
-          const success = await missionsAPI.acceptMission(missionId);
-          if (success) {
-            notificationSystem.show('✅ Mission Accepted!', 'success');
-            await loadMissions();
-          } else {
-            notificationSystem.show('❌ Failed to accept mission', 'error');
-            target.disabled = false;
-            target.textContent = 'Accept Mission';
+            const success = await missionsAPI.acceptMission(missionId);
+            if (success) {
+              notificationSystem.show('✅ Mission Accepted!', 'success');
+              await loadMissions();
+            } else {
+              notificationSystem.show('❌ Failed to accept mission', 'error');
+              target.disabled = false;
+              target.textContent = 'Accept Mission';
+            }
           }
-        }
+        });
       });
-    });
+    } else {
+      // Add event listeners for login buttons
+      missionList.querySelectorAll('[data-login-required]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          notificationSystem.show('🔐 Please login to accept missions', 'info');
+          // Optionally trigger login flow
+          const googleLoginBtn = document.getElementById('google-login-btn');
+          if (googleLoginBtn) {
+            googleLoginBtn.scrollIntoView({ behavior: 'smooth' });
+          }
+        });
+      });
+    }
   }
 
   function renderPlayerMissions(missions: PlayerMission[]) {
