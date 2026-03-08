@@ -1,13 +1,14 @@
 -- Players table
 CREATE TABLE IF NOT EXISTS players (
-  id TEXT PRIMARY KEY,              -- Google user ID
-  email TEXT UNIQUE NOT NULL,
+  id TEXT PRIMARY KEY,              -- Google user ID or guest_xxx
+  email TEXT,                       -- Empty for guest users
   name TEXT NOT NULL,
   avatar_url TEXT,
   resources TEXT DEFAULT '{"wood":0,"stone":0,"fish":0,"gems":0,"shells":0,"herbs":0}',
   coins INTEGER DEFAULT 0,          -- Mission rewards currency
   lng REAL DEFAULT -73.965,
   lat REAL DEFAULT 40.782,
+  is_guest INTEGER DEFAULT 0,       -- 1 for guest users, 0 for authenticated
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
