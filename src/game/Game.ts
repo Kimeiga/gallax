@@ -1241,6 +1241,13 @@ export class Game {
   // Load buildings from D1 database (for persistence)
   private async loadBuildingsFromD1(): Promise<void> {
     try {
+      // Check version first - if cache is invalid, skip loading
+      const isValid = await this.validateBuildingsCache();
+      if (!isValid) {
+        console.log('🔄 Buildings cache invalidated by server, skipping D1 load');
+        return;
+      }
+
       console.log('📂 Loading buildings from D1...');
       const buildings = await buildingsAPI.getAll();
 
@@ -1267,6 +1274,31 @@ export class Game {
       }
     } catch (err) {
       console.error('Failed to load buildings from D1:', err);
+    }
+  }
+
+  private async validateBuildingsCache(): Promise<boolean> {
+    try {
+      const response = await fetch('/api/game-version');
+      const { buildings_version } = await response.json();
+
+      const cachedVersion = localStorage.getItem('gallax_buildings_version');
+
+      if (cachedVersion !== buildings_version) {
+        // Version mismatch - cache is invalid
+        console.log(`🔄 Version mismatch: cached=${cachedVersion}, server=${buildings_version}`);
+        localStorage.setItem('gallax_buildings_version', buildings_version);
+
+        // Clear all building-related caches
+        localStorage.removeItem('gallax_production_buildings');
+
+        return false;
+      }
+
+      return true;
+    } catch (err) {
+      console.error('Failed to validate buildings cache:', err);
+      return true; // On error, allow loading to avoid breaking the game
     }
   }
 
