@@ -1,6 +1,6 @@
 // Session helper utilities
 interface Env {
-  DB: D1Database;
+  DB: any; // D1Database type from @cloudflare/workers-types
 }
 
 interface User {
