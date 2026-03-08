@@ -613,7 +613,9 @@ export class Game {
       // Exit placement mode
       this.isPlacingBuilding = false;
       this.crafting.selectBuilding(null);
+      this.hidePlacementHint();
       this.updateCraftingUI();
+      this.updateMapCursor();
     }
   }
 
@@ -1637,15 +1639,63 @@ export class Game {
             // Deselect
             this.crafting.selectBuilding(null);
             this.isPlacingBuilding = false;
+            this.hidePlacementHint();
           } else {
             // Select for placement
             this.crafting.selectBuilding(type);
             this.isPlacingBuilding = true;
+            this.showPlacementHint(BUILDING_DEFS[type].emoji, BUILDING_DEFS[type].name);
           }
           this.updateCraftingUI();
+          this.updateMapCursor();
         }
       });
     });
+  }
+
+  // Show placement hint
+  private showPlacementHint(emoji: string, name: string): void {
+    let hint = document.getElementById('placement-hint');
+    if (!hint) {
+      hint = document.createElement('div');
+      hint.id = 'placement-hint';
+      hint.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.9);
+        color: white;
+        padding: 20px 30px;
+        border-radius: 12px;
+        font-size: 18px;
+        font-weight: bold;
+        z-index: 9999;
+        pointer-events: none;
+        animation: fadeIn 0.3s ease-out;
+      `;
+      document.body.appendChild(hint);
+    }
+    hint.innerHTML = `${emoji} Click on the map to place ${name}`;
+  }
+
+  // Hide placement hint
+  private hidePlacementHint(): void {
+    const hint = document.getElementById('placement-hint');
+    if (hint) {
+      hint.remove();
+    }
+  }
+
+  // Update map cursor based on placement mode
+  private updateMapCursor(): void {
+    const map = this.mapManager.getMap();
+    const mapContainer = map.getContainer();
+    if (this.isPlacingBuilding) {
+      mapContainer.style.cursor = 'crosshair';
+    } else {
+      mapContainer.style.cursor = '';
+    }
   }
 
   // Helper to get emoji for resource type
