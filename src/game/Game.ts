@@ -305,6 +305,21 @@ export class Game {
     console.log('  - isConnected() - Check if connected to server');
   }
 
+  // Public method to change player sprite (used by settings menu)
+  async changePlayerSprite(spriteNum: number): Promise<void> {
+    if (!this.player) return;
+
+    // Update local sprite
+    await this.player.changeSprite(spriteNum);
+
+    // Update stored sprite number
+    this.playerSpriteNum = spriteNum;
+    localStorage.setItem('gallax_player_sprite', spriteNum.toString());
+
+    // TODO: Send sprite change to server so other players see it
+    // this.network.changeSprite(spriteNum);
+  }
+
   private start(): void {
     this.isRunning = true;
     this.app.ticker.add((ticker: Ticker) => {

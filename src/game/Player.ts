@@ -93,6 +93,28 @@ export class Player {
     return this.playerName;
   }
 
+  async changeSprite(spriteNum: number): Promise<void> {
+    if (spriteNum < 1 || spriteNum > 125) {
+      console.error('Invalid sprite number:', spriteNum);
+      return;
+    }
+
+    try {
+      const texture = await Assets.load(`/sprites/${spriteNum}.png`);
+      texture.source.scaleMode = 'nearest';
+
+      if (this.sprite) {
+        // Preserve current scale and position
+        const currentScale = this.sprite.scale.clone();
+        this.sprite.texture = texture;
+        this.sprite.scale = currentScale;
+        console.log(`✨ Changed sprite to ${spriteNum}`);
+      }
+    } catch (error) {
+      console.error('Failed to load new sprite:', error);
+    }
+  }
+
   // For server reconciliation - directly set position
   setPosition(lng: number, lat: number): void {
     this.lng = lng;

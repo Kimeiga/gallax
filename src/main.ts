@@ -344,6 +344,9 @@ async function main() {
     const game = new Game(mapManager);
     await game.init();
 
+    // Expose game globally for settings menu
+    (window as any).game = game;
+
     console.log('Game initialized! Use WASD or arrow keys to move.');
   });
 }
@@ -765,7 +768,7 @@ function setupSettingsMenu(): void {
 
     <div style="margin-bottom: 30px;">
       <h3 style="color: white; margin-bottom: 15px;">🎭 Character Customization</h3>
-      <div id="character-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); gap: 10px; max-height: 300px; overflow-y: auto; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 10px;"></div>
+      <div id="character-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(50px, 1fr)); gap: 8px; max-height: 300px; overflow-y: auto; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 10px;"></div>
       <button id="randomize-character" style="margin-top: 10px; padding: 10px 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%;">🎲 Randomize</button>
     </div>
   `;
@@ -781,36 +784,50 @@ function setupSettingsMenu(): void {
   for (let i = 1; i <= 125; i++) {
     const btn = document.createElement('button');
     btn.style.cssText = `
-      width: 60px;
-      height: 60px;
-      border: 3px solid ${i === currentSprite ? '#667eea' : 'rgba(255, 255, 255, 0.2)'};
+      width: 50px;
+      min-height: 50px;
+      border: 3px solid ${i === currentSprite ? '#667eea' : 'transparent'};
       border-radius: 8px;
-      background: rgba(0, 0, 0, 0.5);
+      background: transparent;
       cursor: pointer;
-      padding: 5px;
+      padding: 4px;
       transition: all 0.2s;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
     `;
-    btn.innerHTML = `<img src="/sprites/${i}.png" style="width: 100%; height: 100%; image-rendering: pixelated;" />`;
-    btn.onclick = () => {
-      localStorage.setItem('gallax_player_sprite', i.toString());
+    btn.innerHTML = `<img src="/sprites/${i}.png" style="width: 100%; height: auto; image-rendering: pixelated; display: block;" />`;
+    btn.onclick = async () => {
+      // Update sprite in real-time
+      const game = (window as any).game;
+      if (game) {
+        await game.changePlayerSprite(i);
+        notificationSystem.show(`✨ Character changed!`, 'coin');
+      }
+
       // Update all borders
       grid.querySelectorAll('button').forEach((b, idx) => {
-        (b as HTMLElement).style.border = `3px solid ${idx + 1 === i ? '#667eea' : 'rgba(255, 255, 255, 0.2)'}`;
+        (b as HTMLElement).style.border = `3px solid ${idx + 1 === i ? '#667eea' : 'transparent'}`;
       });
-      notificationSystem.show(`Character updated! Refresh to see changes.`, 'coin');
     };
     grid.appendChild(btn);
   }
 
   // Randomize button
   const randomizeBtn = panel.querySelector('#randomize-character') as HTMLButtonElement;
-  randomizeBtn.onclick = () => {
+  randomizeBtn.onclick = async () => {
     const random = Math.floor(Math.random() * 125) + 1;
-    localStorage.setItem('gallax_player_sprite', random.toString());
+
+    // Update sprite in real-time
+    const game = (window as any).game;
+    if (game) {
+      await game.changePlayerSprite(random);
+      notificationSystem.show(`🎲 Character randomized!`, 'coin');
+    }
+
     grid.querySelectorAll('button').forEach((b, idx) => {
-      (b as HTMLElement).style.border = `3px solid ${idx + 1 === random ? '#667eea' : 'rgba(255, 255, 255, 0.2)'}`;
+      (b as HTMLElement).style.border = `3px solid ${idx + 1 === random ? '#667eea' : 'transparent'}`;
     });
-    notificationSystem.show(`Character randomized! Refresh to see changes.`, 'coin');
   };
 
   // Open/close modal
