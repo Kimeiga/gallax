@@ -1,11 +1,11 @@
-import { getSessionUser } from '../auth/session';
+import { getPlayerId } from '../auth/session';
 
 // GET /api/missions/player - Get player's active missions
 // POST /api/missions/player - Accept a new mission
 export async function onRequestGet(context: any) {
   try {
-    const user = await getSessionUser(context);
-    if (!user) {
+    const playerId = await getPlayerId(context.env, context.request);
+    if (!playerId) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' },
@@ -14,7 +14,7 @@ export async function onRequestGet(context: any) {
 
     const db = context.env.DB;
     const { results } = await db.prepare(`
-      SELECT 
+      SELECT
         pm.id,
         pm.mission_id,
         pm.status,
@@ -33,7 +33,7 @@ export async function onRequestGet(context: any) {
       JOIN public_spaces ps ON m.space_id = ps.id
       WHERE pm.player_id = ?
       ORDER BY pm.started_at DESC
-    `).bind(user.id).all();
+    `).bind(playerId).all();
 
     return new Response(JSON.stringify(results), {
       headers: { 'Content-Type': 'application/json' },
@@ -49,8 +49,8 @@ export async function onRequestGet(context: any) {
 
 export async function onRequestPost(context: any) {
   try {
-    const user = await getSessionUser(context);
-    if (!user) {
+    const playerId = await getPlayerId(context.env, context.request);
+    if (!playerId) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' },
@@ -66,7 +66,7 @@ export async function onRequestPost(context: any) {
     }
 
     const db = context.env.DB;
-    
+
     // Check if mission exists
     const mission = await db.prepare('SELECT * FROM missions WHERE id = ?').bind(missionId).first();
     if (!mission) {
@@ -79,7 +79,7 @@ export async function onRequestPost(context: any) {
     // Check if player already has this mission
     const existing = await db.prepare(
       'SELECT * FROM player_missions WHERE player_id = ? AND mission_id = ? AND status != ?'
-    ).bind(user.id, missionId, 'claimed').first();
+    ).bind(playerId, missionId, 'claimed').first();
 
     if (existing) {
       return new Response(JSON.stringify({ error: 'Mission already accepted' }), {
@@ -93,7 +93,7 @@ export async function onRequestPost(context: any) {
     await db.prepare(`
       INSERT INTO player_missions (id, player_id, mission_id, status, progress)
       VALUES (?, ?, ?, 'active', '{}')
-    `).bind(id, user.id, missionId).run();
+    `).bind(id, playerId, missionId).run();
 
     return new Response(JSON.stringify({ success: true, id }), {
       headers: { 'Content-Type': 'application/json' },

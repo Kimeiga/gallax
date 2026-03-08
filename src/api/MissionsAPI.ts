@@ -36,6 +36,18 @@ export interface PlayerMission {
 class MissionsAPI {
   private baseUrl = '/api/missions';
 
+  private getHeaders(): HeadersInit {
+    const headers: HeadersInit = { 'Content-Type': 'application/json' };
+
+    // Add guest ID header if user is a guest
+    const guestId = localStorage.getItem('gallax_guest_id');
+    if (guestId) {
+      headers['X-Guest-ID'] = guestId;
+    }
+
+    return headers;
+  }
+
   async getPublicSpaces(): Promise<PublicSpace[]> {
     const res = await fetch(`${this.baseUrl}/spaces`);
     if (!res.ok) throw new Error('Failed to fetch public spaces');
@@ -49,7 +61,9 @@ class MissionsAPI {
   }
 
   async getPlayerMissions(): Promise<PlayerMission[]> {
-    const res = await fetch(`${this.baseUrl}/player`);
+    const res = await fetch(`${this.baseUrl}/player`, {
+      headers: this.getHeaders(),
+    });
     if (!res.ok) {
       // Return empty array if not authenticated (401) instead of throwing
       if (res.status === 401) {
@@ -63,7 +77,7 @@ class MissionsAPI {
   async acceptMission(missionId: string): Promise<boolean> {
     const res = await fetch(`${this.baseUrl}/player`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.getHeaders(),
       body: JSON.stringify({ missionId }),
     });
     if (!res.ok) {
@@ -78,7 +92,7 @@ class MissionsAPI {
   async completeMission(playerMissionId: string): Promise<{ success: boolean; coinsAwarded?: number }> {
     const res = await fetch(`${this.baseUrl}/complete`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.getHeaders(),
       body: JSON.stringify({ playerMissionId }),
     });
     if (!res.ok) return { success: false };

@@ -74,7 +74,7 @@ class AuthService {
       id: guestId,
       email: '',
       name: 'Guest Player',
-      avatarUrl: '',
+      avatarUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=guest',
       resources: {},
       lng: -73.965,
       lat: 40.782,

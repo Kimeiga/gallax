@@ -154,8 +154,6 @@ function setupMissionUI() {
       return;
     }
 
-    const isLoggedIn = authService.isAuthenticated();
-
     missionList.innerHTML = missions.map(mission => `
       <div class="mission-card">
         <div class="mission-card-header">
@@ -164,7 +162,7 @@ function setupMissionUI() {
         </div>
         <p class="mission-description">${mission.description}</p>
         <div class="mission-actions">
-          ${isLoggedIn
+          ${authService.hasUser()
             ? `<button class="mission-btn mission-btn-primary" data-mission-id="${mission.id}">Accept Mission</button>`
             : `<button class="mission-btn mission-btn-secondary" data-login-required="true">Login to Accept</button>`
           }
@@ -172,8 +170,8 @@ function setupMissionUI() {
       </div>
     `).join('');
 
-    if (isLoggedIn) {
-      // Add event listeners for accept buttons
+    if (authService.hasUser()) {
+      // Add event listeners for accept buttons (works for both authenticated and guest users)
       missionList.querySelectorAll('.mission-btn-primary').forEach(btn => {
         btn.addEventListener('click', async (e) => {
           const target = e.target as HTMLButtonElement;
