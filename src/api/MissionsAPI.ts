@@ -50,7 +50,13 @@ class MissionsAPI {
 
   async getPlayerMissions(): Promise<PlayerMission[]> {
     const res = await fetch(`${this.baseUrl}/player`);
-    if (!res.ok) throw new Error('Failed to fetch player missions');
+    if (!res.ok) {
+      // Return empty array if not authenticated (401) instead of throwing
+      if (res.status === 401) {
+        return [];
+      }
+      throw new Error('Failed to fetch player missions');
+    }
     return res.json();
   }
 
