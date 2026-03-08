@@ -540,7 +540,7 @@ function setupWeatherUI(): void {
   weatherIndicator.id = 'weather-indicator';
   weatherIndicator.style.cssText = `
     position: fixed;
-    top: 20px;
+    top: 80px;
     right: 20px;
     background: rgba(0, 0, 0, 0.7);
     color: white;

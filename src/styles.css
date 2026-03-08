@@ -186,7 +186,7 @@ html, body {
 /* Crafting Menu */
 #crafting-menu {
   position: fixed;
-  top: 10px;
+  top: 170px;
   right: 10px;
   background: rgba(0, 0, 0, 0.85);
   padding: 12px;
@@ -574,15 +574,15 @@ html, body {
 /* Auth UI */
 #auth-ui {
   position: fixed;
-  top: 10px;
-  right: 60px;
+  top: 80px;
+  right: 10px;
   z-index: 200;
 }
 
 @media (pointer: coarse) {
   #auth-ui {
-    right: 70px;
-    top: 10px;
+    right: 10px;
+    top: 80px;
   }
 }
 
