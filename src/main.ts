@@ -562,12 +562,12 @@ function setupDailyRewardsUI(dailyRewards: DailyRewardSystem, progression: Progr
 }
 
 function setupWeatherUI(): void {
-  // Create weather indicator in top-right corner
+  // Create weather indicator in bottom-right corner
   const weatherIndicator = document.createElement('div');
   weatherIndicator.id = 'weather-indicator';
   weatherIndicator.style.cssText = `
     position: fixed;
-    top: 80px;
+    bottom: 80px;
     right: 20px;
     background: rgba(0, 0, 0, 0.7);
     color: white;
