@@ -80,3 +80,13 @@ CREATE TABLE IF NOT EXISTS player_missions (
 CREATE INDEX IF NOT EXISTS idx_player_missions_player ON player_missions(player_id);
 CREATE INDEX IF NOT EXISTS idx_player_missions_status ON player_missions(status);
 
+-- Game metadata for cache invalidation
+CREATE TABLE IF NOT EXISTS game_metadata (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Initialize buildings version
+INSERT OR IGNORE INTO game_metadata (key, value) VALUES ('buildings_version', '1');
+

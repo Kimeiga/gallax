@@ -27,11 +27,40 @@ export class ResourceProductionSystem {
     this.startProductionLoop();
   }
 
-  private loadBuildings(): void {
+  private async loadBuildings(): Promise<void> {
+    // Check if cache is still valid
+    const isValid = await this.validateCache();
+    if (!isValid) {
+      console.log('🔄 Cache invalidated, clearing production buildings');
+      localStorage.removeItem('gallax_production_buildings');
+      localStorage.removeItem('gallax_buildings_version');
+      return;
+    }
+
     const saved = localStorage.getItem('gallax_production_buildings');
     if (saved) {
       const data = JSON.parse(saved);
       this.buildings = new Map(Object.entries(data));
+    }
+  }
+
+  private async validateCache(): Promise<boolean> {
+    try {
+      const response = await fetch('/api/game-version');
+      const { buildings_version } = await response.json();
+
+      const cachedVersion = localStorage.getItem('gallax_buildings_version');
+
+      if (cachedVersion !== buildings_version) {
+        // Version mismatch - cache is invalid
+        localStorage.setItem('gallax_buildings_version', buildings_version);
+        return false;
+      }
+
+      return true;
+    } catch (err) {
+      console.error('Failed to validate cache:', err);
+      return true; // On error, keep cache to avoid data loss
     }
   }
 
