@@ -33,7 +33,7 @@ function hashString(str: string): number {
   return Math.abs(hash);
 }
 
-interface NPC {
+export interface NPC {
   id: string;
   cellId: string; // The cell this NPC belongs to
   sprite: Sprite;
@@ -43,7 +43,10 @@ interface NPC {
   vy: number; // velocity in lat
   seed: number;
   nextDirectionChange: number; // timestamp
+  frozen: boolean; // Whether this NPC is frozen (in dialogue)
 }
+
+export type NPCClickCallback = (npc: NPC) => void;
 
 export class NPCManager {
   private npcs: Map<string, NPC> = new Map();
@@ -51,6 +54,7 @@ export class NPCManager {
   private app: Application;
   private textures: Texture[] = [];
   private spawnedAreas: Set<string> = new Set();
+  private onNPCClickCallback: NPCClickCallback | null = null;
 
   private readonly baseZoom = 16;
   private readonly baseScale = 0.75; // Same size as player
@@ -61,6 +65,11 @@ export class NPCManager {
   constructor(mapManager: MapManager, app: Application) {
     this.mapManager = mapManager;
     this.app = app;
+  }
+
+  // Set callback for when NPC is clicked
+  onNPCClick(callback: NPCClickCallback): void {
+    this.onNPCClickCallback = callback;
   }
 
   async loadTextures(): Promise<void> {
@@ -153,6 +162,10 @@ export class NPCManager {
     sprite.anchor.set(0.5, 1);
     sprite.roundPixels = true;
 
+    // Make sprite interactive
+    sprite.eventMode = 'static';
+    sprite.cursor = 'pointer';
+
     this.app.stage.addChild(sprite);
 
     // Random initial direction
@@ -167,8 +180,16 @@ export class NPCManager {
       vx: Math.cos(angle) * this.moveSpeed,
       vy: Math.sin(angle) * this.moveSpeed,
       seed: hashString(id),
-      nextDirectionChange: Date.now() + rng.range(1000, this.DIRECTION_CHANGE_INTERVAL)
+      nextDirectionChange: Date.now() + rng.range(1000, this.DIRECTION_CHANGE_INTERVAL),
+      frozen: false
     };
+
+    // Add click handler
+    sprite.on('pointerdown', () => {
+      if (this.onNPCClickCallback) {
+        this.onNPCClickCallback(npc);
+      }
+    });
 
     this.npcs.set(id, npc);
     this.updateNPCPosition(npc);
@@ -189,6 +210,12 @@ export class NPCManager {
     const now = Date.now();
 
     for (const npc of this.npcs.values()) {
+      // Skip frozen NPCs (in dialogue)
+      if (npc.frozen) {
+        this.updateNPCPosition(npc); // Still update visual position for zoom/pan
+        continue;
+      }
+
       // Check if it's time to change direction
       if (now >= npc.nextDirectionChange) {
         this.changeDirection(npc, now);
@@ -269,6 +296,53 @@ export class NPCManager {
   // Get current NPC count
   getCount(): number {
     return this.npcs.size;
+  }
+
+  // Find NPC at screen position (for click detection)
+  findNPCAtPoint(screenX: number, screenY: number): NPC | null {
+    const hitRadius = 30; // pixels
+
+    for (const npc of this.npcs.values()) {
+      const dx = npc.sprite.x - screenX;
+      const dy = npc.sprite.y - screenY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < hitRadius) {
+        return npc;
+      }
+    }
+
+    return null;
+  }
+
+  // Get all NPCs
+  getAllNPCs(): Map<string, NPC> {
+    return this.npcs;
+  }
+
+  // Freeze an NPC (stop movement during dialogue)
+  freezeNPC(npcId: string): void {
+    const npc = this.npcs.get(npcId);
+    if (npc) {
+      npc.frozen = true;
+      npc.vx = 0;
+      npc.vy = 0;
+    }
+  }
+
+  // Unfreeze an NPC (resume movement after dialogue)
+  unfreezeNPC(npcId: string): void {
+    const npc = this.npcs.get(npcId);
+    if (npc) {
+      npc.frozen = false;
+      // Give them a new random direction
+      this.changeDirection(npc, Date.now());
+    }
+  }
+
+  // Get NPC by ID
+  getNPC(npcId: string): NPC | undefined {
+    return this.npcs.get(npcId);
   }
 }
 

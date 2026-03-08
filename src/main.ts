@@ -40,7 +40,14 @@ function setupAuthUI() {
   // Update UI based on auth state
   authService.onAuthChange((user: User | null) => {
     if (user) {
-      loginContainer.style.display = 'none';
+      // Always show both login button and user info
+      // If guest, show login button to upgrade to Google account
+      // If authenticated, show login button is hidden via CSS or can be used to switch accounts
+      if (user.isGuest) {
+        loginContainer.style.display = 'flex';
+      } else {
+        loginContainer.style.display = 'none';
+      }
       userContainer.style.display = 'flex';
       userAvatar.src = user.avatarUrl || '';
       userName.textContent = user.name || 'User';

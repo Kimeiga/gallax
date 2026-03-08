@@ -3,7 +3,7 @@ import { MapManager } from '../map/MapManager';
 import { Player, TargetResource } from './Player';
 import { InputManager } from './InputManager';
 import { ResourceManager } from './Resources';
-import { NPCManager } from './NPCManager';
+import { NPCManager, NPC } from './NPCManager';
 import { WaterEntityManager } from './WaterEntityManager';
 import { TerrainEntityManager } from './TerrainEntityManager';
 import { Inventory, EMOJI_TO_RESOURCE, RESOURCE_INFO } from './Inventory';
@@ -17,6 +17,9 @@ import { buildingsAPI } from '../api/BuildingsAPI';
 import { PublicSpacesManager } from './PublicSpacesManager';
 import { PublicSpace } from '../api/MissionsAPI';
 import { notificationSystem } from './NotificationSystem';
+import { DialogueUI } from './DialogueUI';
+import { NPCMissionSystem } from './NPCMissionSystem';
+import { getRandomConversation, getMissionConversation } from './DialogueSystem';
 
 export class Game {
   private app: Application;
@@ -58,6 +61,11 @@ export class Game {
   // Building rotation and movement
   private selectedBuildingId: string | null = null;
   private rotationHandleEl: HTMLElement | null = null;
+
+  // NPC Dialogue and Missions
+  private dialogueUI: DialogueUI;
+  private npcMissionSystem: NPCMissionSystem;
+  private currentDialogueNPCId: string | null = null; // Track which NPC is in dialogue
   private moveHandleEl: HTMLElement | null = null;
   private rotationLineEl: HTMLElement | null = null;
   private buildingGlowEl: HTMLElement | null = null;
@@ -77,6 +85,8 @@ export class Game {
     this.network = new NetworkManager();
     this.crafting = new CraftingSystem(this.inventory);
     this.performanceManager = getPerformanceManager();
+    this.dialogueUI = new DialogueUI();
+    this.npcMissionSystem = new NPCMissionSystem();
 
     // Load saved sprite number from localStorage, or generate a random one
     const savedSpriteNum = localStorage.getItem('gallax_player_sprite');
@@ -197,7 +207,15 @@ export class Game {
 
     // Setup inventory UI
     this.createInventoryUI();
-    this.inventory.onChange(() => this.updateInventoryUI());
+    this.inventory.onChange(() => {
+      this.updateInventoryUI();
+      // Update mission progress when inventory changes
+      const inventoryData: Record<string, number> = {};
+      this.inventory.getAll().forEach((count, type) => {
+        inventoryData[type] = count;
+      });
+      this.npcMissionSystem.updateProgress(inventoryData);
+    });
 
     // Setup crafting UI
     this.createCraftingUI();
@@ -509,6 +527,19 @@ export class Game {
       const screenX = e.point.x;
       const screenY = e.point.y;
 
+      // If dialogue is open, close it when clicking elsewhere
+      if (this.dialogueUI.isVisible()) {
+        console.log('💬 Closing dialogue (clicked elsewhere)');
+        this.dialogueUI.hide();
+
+        // Unfreeze the NPC
+        if (this.currentDialogueNPCId) {
+          this.npcManager?.unfreezeNPC(this.currentDialogueNPCId);
+          this.currentDialogueNPCId = null;
+        }
+        return;
+      }
+
       // If placing a building, handle building placement
       if (this.isPlacingBuilding && this.crafting.getSelectedBuilding()) {
         this.handleBuildingPlacement(clickLng, clickLat);
@@ -525,6 +556,22 @@ export class Game {
       // Clicking elsewhere deselects any selected building
       if (this.selectedBuildingId) {
         this.deselectBuilding();
+      }
+
+      // Check if clicked on an NPC (highest priority for interaction)
+      const npc = this.npcManager?.findNPCAtPoint(screenX, screenY);
+      if (npc && this.player) {
+        // Set NPC as target (move to them like a resource)
+        this.player.setTarget({
+          lng: npc.lng,
+          lat: npc.lat,
+          type: 'npc',
+          npcId: npc.id
+        }, () => {
+          // When player reaches NPC, start dialogue
+          this.startNPCDialogue(npc);
+        });
+        return;
       }
 
       // Check if clicked on a resource
@@ -1154,6 +1201,83 @@ export class Game {
       this.waterEntityManager.removeEntity(id);
     } else if (type === 'terrain' && this.terrainEntityManager) {
       this.terrainEntityManager.removeEntity(id);
+    }
+  }
+
+  // Start dialogue with an NPC
+  private startNPCDialogue(npc: NPC): void {
+    console.log(`💬 Starting dialogue with NPC ${npc.id}`);
+
+    // Track which NPC is in dialogue
+    this.currentDialogueNPCId = npc.id;
+
+    // Freeze the NPC so they stop moving
+    this.npcManager?.freezeNPC(npc.id);
+
+    // Update mission progress based on current inventory
+    const inventoryData: Record<string, number> = {};
+    this.inventory.getAll().forEach((count, type) => {
+      inventoryData[type] = count;
+    });
+    this.npcMissionSystem.updateProgress(inventoryData);
+
+    // Check if this NPC has an active mission
+    const activeMissions = this.npcMissionSystem.getActiveMissions();
+    let conversation = null;
+
+    // Try to find a mission-related conversation
+    for (const mission of activeMissions) {
+      const hasMission = this.npcMissionSystem.hasMission(mission.id);
+      const missionConv = getMissionConversation(mission.id, hasMission);
+      if (missionConv) {
+        conversation = missionConv;
+        break;
+      }
+    }
+
+    // If no mission conversation, show random small talk
+    if (!conversation) {
+      const activeMissionIds = activeMissions.map(m => m.id);
+      conversation = getRandomConversation(activeMissionIds);
+    }
+
+    // Get player position
+    const playerPos = this.player?.getPosition();
+    if (!playerPos) return;
+
+    // Show dialogue UI with positions
+    this.dialogueUI.show(
+      conversation,
+      (action, missionId) => {
+        this.handleDialogueAction(action, missionId, npc.id);
+      },
+      this.mapManager,
+      { lng: npc.lng, lat: npc.lat },
+      playerPos
+    );
+  }
+
+  // Handle dialogue actions (accept mission, complete mission, etc.)
+  private handleDialogueAction(action: string, missionId?: string, npcId?: string): void {
+    if (action === 'accept_mission' && missionId) {
+      this.npcMissionSystem.acceptMission(missionId);
+      notificationSystem.show(`📜 Mission accepted: ${missionId}`, 'info');
+    } else if (action === 'complete_mission' && missionId) {
+      const progression = (window as any).progression;
+      const result = this.npcMissionSystem.completeMission(missionId, this.inventory, progression);
+
+      if (result.success) {
+        notificationSystem.show(`🎉 Mission complete! +${result.xp} XP, +${result.coins} coins`, 'success');
+        notificationSystem.showXP(result.xp);
+      } else {
+        notificationSystem.show(`❌ Mission requirements not met`, 'error');
+      }
+    }
+
+    // Always unfreeze NPC when dialogue ends (for any action)
+    if (npcId) {
+      this.npcManager?.unfreezeNPC(npcId);
+      this.currentDialogueNPCId = null;
     }
   }
 

@@ -114,6 +114,8 @@ class AuthService {
     localStorage.removeItem(this.GUEST_ID_KEY);
   }
 
+
+
   login() {
     window.location.href = '/api/auth/google';
   }
