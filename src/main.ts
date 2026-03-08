@@ -473,6 +473,9 @@ function setupAchievementsUI(achievements: AchievementSystem, progression: Progr
       // TODO: Add coins to player account
     });
   }, 2000);
+
+  // Setup settings menu
+  setupSettingsMenu();
 }
 
 function setupDailyRewardsUI(dailyRewards: DailyRewardSystem, progression: ProgressionSystem): void {
@@ -485,6 +488,14 @@ function setupDailyRewardsUI(dailyRewards: DailyRewardSystem, progression: Progr
   const rewardBonus = document.getElementById('reward-bonus');
 
   if (!modal || !claimBtn || !closeBtn) return;
+
+  // Only show daily reward if user is authenticated and can claim
+  const user = authService.getUser();
+  if (!user) {
+    // Hide modal for unauthenticated users
+    modal.style.display = 'none';
+    return;
+  }
 
   // Check if user can claim daily reward
   if (dailyRewards.canClaimToday()) {
@@ -686,6 +697,137 @@ function setupLeaderboardUI(): void {
       rankEl.innerHTML = `Your Rank: #${playerRank}`;
     }
   }
+}
+
+function setupSettingsMenu(): void {
+  // Create settings button
+  const settingsBtn = document.createElement('button');
+  settingsBtn.id = 'settings-btn';
+  settingsBtn.textContent = '⚙️';
+  settingsBtn.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    font-size: 24px;
+    cursor: pointer;
+    z-index: 1000;
+    transition: all 0.2s;
+  `;
+  settingsBtn.onmouseenter = () => {
+    settingsBtn.style.background = 'rgba(0, 0, 0, 0.95)';
+    settingsBtn.style.transform = 'scale(1.1)';
+  };
+  settingsBtn.onmouseleave = () => {
+    settingsBtn.style.background = 'rgba(0, 0, 0, 0.8)';
+    settingsBtn.style.transform = 'scale(1)';
+  };
+  document.body.appendChild(settingsBtn);
+
+  // Create settings modal
+  const modal = document.createElement('div');
+  modal.id = 'settings-modal';
+  modal.style.cssText = `
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    z-index: 10000;
+    justify-content: center;
+    align-items: center;
+  `;
+
+  const panel = document.createElement('div');
+  panel.style.cssText = `
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    border-radius: 20px;
+    padding: 30px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  `;
+
+  panel.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <h2 style="margin: 0; color: white; font-size: 24px;">⚙️ Settings</h2>
+      <button id="close-settings" style="background: none; border: none; color: white; font-size: 30px; cursor: pointer; padding: 0; width: 40px; height: 40px;">×</button>
+    </div>
+
+    <div style="margin-bottom: 30px;">
+      <h3 style="color: white; margin-bottom: 15px;">🎭 Character Customization</h3>
+      <div id="character-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); gap: 10px; max-height: 300px; overflow-y: auto; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 10px;"></div>
+      <button id="randomize-character" style="margin-top: 10px; padding: 10px 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%;">🎲 Randomize</button>
+    </div>
+  `;
+
+  modal.appendChild(panel);
+  document.body.appendChild(modal);
+
+  // Load character grid
+  const grid = panel.querySelector('#character-grid') as HTMLElement;
+  const savedSprite = localStorage.getItem('gallax_player_sprite');
+  const currentSprite = savedSprite ? parseInt(savedSprite, 10) : 1;
+
+  for (let i = 1; i <= 125; i++) {
+    const btn = document.createElement('button');
+    btn.style.cssText = `
+      width: 60px;
+      height: 60px;
+      border: 3px solid ${i === currentSprite ? '#667eea' : 'rgba(255, 255, 255, 0.2)'};
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.5);
+      cursor: pointer;
+      padding: 5px;
+      transition: all 0.2s;
+    `;
+    btn.innerHTML = `<img src="/sprites/${i}.png" style="width: 100%; height: 100%; image-rendering: pixelated;" />`;
+    btn.onclick = () => {
+      localStorage.setItem('gallax_player_sprite', i.toString());
+      // Update all borders
+      grid.querySelectorAll('button').forEach((b, idx) => {
+        (b as HTMLElement).style.border = `3px solid ${idx + 1 === i ? '#667eea' : 'rgba(255, 255, 255, 0.2)'}`;
+      });
+      notificationSystem.show(`Character updated! Refresh to see changes.`, 'coin');
+    };
+    grid.appendChild(btn);
+  }
+
+  // Randomize button
+  const randomizeBtn = panel.querySelector('#randomize-character') as HTMLButtonElement;
+  randomizeBtn.onclick = () => {
+    const random = Math.floor(Math.random() * 125) + 1;
+    localStorage.setItem('gallax_player_sprite', random.toString());
+    grid.querySelectorAll('button').forEach((b, idx) => {
+      (b as HTMLElement).style.border = `3px solid ${idx + 1 === random ? '#667eea' : 'rgba(255, 255, 255, 0.2)'}`;
+    });
+    notificationSystem.show(`Character randomized! Refresh to see changes.`, 'coin');
+  };
+
+  // Open/close modal
+  settingsBtn.onclick = () => {
+    modal.style.display = 'flex';
+  };
+
+  const closeBtn = panel.querySelector('#close-settings') as HTMLButtonElement;
+  closeBtn.onclick = () => {
+    modal.style.display = 'none';
+  };
+
+  modal.onclick = (e) => {
+    if (e.target === modal) {
+      modal.style.display = 'none';
+    }
+  };
 }
 
 main().catch(console.error);
