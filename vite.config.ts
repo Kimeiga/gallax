@@ -6,7 +6,16 @@ export default defineConfig({
     open: true
   },
   build: {
-    target: 'ES2022'
+    target: 'ES2022',
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'pixi': ['pixi.js'],
+          'mapbox': ['mapbox-gl'],
+          'vendor': ['@simonwep/pickr', 'emoji-picker-element'],
+        }
+      }
+    }
   }
 });
-

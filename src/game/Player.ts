@@ -2,11 +2,13 @@ import { Application, Sprite, Assets, Text, TextStyle } from 'pixi.js';
 import { MapManager } from '../map/MapManager';
 
 export interface TargetResource {
-  id: string;
+  id?: string;
   lng: number;
   lat: number;
-  emoji: string;
-  type: 'tree' | 'water' | 'terrain';
+  emoji?: string;
+  type: 'tree' | 'water' | 'terrain' | 'npc' | 'mob';
+  npcId?: string; // For NPC targets
+  mobId?: string; // For mob targets
 }
 
 export class Player {
@@ -30,6 +32,13 @@ export class Player {
 
   // Callback when player reaches target
   private onReachTargetCallback: ((target: TargetResource) => void) | null = null;
+
+  // Combat state
+  public maxHp: number = 50;
+  public currentHp: number = 50;
+  public isInCombat: boolean = false;
+  public invulnerableUntil: number = 0; // Timestamp for post-death protection
+  private damageFlashTimer: number = 0;
 
   // Sprite scaling
   private readonly baseZoom = 16; // Zoom level where sprite is "native" size
@@ -165,6 +174,14 @@ export class Player {
   update(deltaTime: number): void {
     if (!this.sprite) return;
 
+    // Damage flash timer
+    if (this.damageFlashTimer > 0) {
+      this.damageFlashTimer -= deltaTime * 16; // deltaTime is in frames (~16ms each)
+      if (this.damageFlashTimer <= 0) {
+        this.sprite.tint = 0xffffff;
+      }
+    }
+
     // If auto-walking to target
     if (this.isAutoWalking && this.targetResource) {
       const dx = this.targetResource.lng - this.lng;
@@ -179,12 +196,18 @@ export class Player {
         }
         this.cancelTarget();
       } else {
-        // Move towards target
+        // Move towards target with easing (decelerate near destination)
         const dirX = dx / distance;
         const dirY = dy / distance;
 
-        this.lng += dirX * this.moveSpeed * deltaTime;
-        this.lat += dirY * this.moveSpeed * deltaTime;
+        // Ease: full speed until close, then decelerate smoothly
+        const easeDistance = 0.0005; // Start slowing at ~50m
+        const speedFactor = distance < easeDistance
+          ? 0.3 + 0.7 * (distance / easeDistance) // Min 30% speed near target
+          : 1.0;
+
+        this.lng += dirX * this.moveSpeed * speedFactor * deltaTime;
+        this.lat += dirY * this.moveSpeed * speedFactor * deltaTime;
 
         // Flip sprite based on direction
         if (this.sprite) {
@@ -230,6 +253,42 @@ export class Player {
       const nameScale = Math.max(0.8, Math.min(1.2, scale * 0.8));
       this.nameTag.scale.set(nameScale);
     }
+  }
+
+  // Combat methods
+  initCombatStats(level: number): void {
+    this.maxHp = 30 + (level * 8);
+    this.currentHp = this.maxHp;
+  }
+
+  takeDamage(amount: number): number {
+    if (Date.now() < this.invulnerableUntil) return 0;
+    const actual = Math.max(0, Math.round(amount));
+    this.currentHp = Math.max(0, this.currentHp - actual);
+    this.damageFlashTimer = 150; // ms of red flash
+    if (this.sprite) this.sprite.tint = 0xff4444;
+    return actual;
+  }
+
+  heal(amount: number): number {
+    const actual = Math.min(Math.round(amount), this.maxHp - this.currentHp);
+    this.currentHp += actual;
+    return actual;
+  }
+
+  respawn(): void {
+    this.currentHp = this.maxHp;
+    this.isInCombat = false;
+    this.invulnerableUntil = Date.now() + 10000; // 10s invulnerability
+    if (this.sprite) this.sprite.tint = 0xffffff;
+  }
+
+  isAlive(): boolean {
+    return this.currentHp > 0;
+  }
+
+  isInvulnerable(): boolean {
+    return Date.now() < this.invulnerableUntil;
   }
 
   getPosition(): { lng: number; lat: number } {

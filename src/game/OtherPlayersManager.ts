@@ -94,6 +94,20 @@ export class OtherPlayersManager {
     }
   }
 
+  async changeSprite(playerId: string, spriteNum: number): Promise<void> {
+    const player = this.players.get(playerId);
+    if (!player) return;
+
+    try {
+      const texture = await Assets.load(`/sprites/${spriteNum}.png`);
+      texture.source.scaleMode = 'nearest';
+      player.sprite.texture = texture;
+      player.spriteNum = spriteNum;
+    } catch (error) {
+      console.error(`Failed to change sprite for player ${playerId}:`, error);
+    }
+  }
+
   update(deltaTime: number): void {
     // Interpolate player positions for smooth movement
     for (const player of this.players.values()) {

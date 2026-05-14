@@ -6,10 +6,17 @@ import { missionsAPI, PublicSpace, Mission, PlayerMission } from './api/Missions
 import { ProgressionSystem } from './game/ProgressionSystem';
 import { notificationSystem } from './game/NotificationSystem';
 import { AchievementSystem } from './game/AchievementSystem';
-import { DailyRewardSystem } from './game/DailyRewards';
+// Daily rewards removed - replaced by combat system
+import { EmojiDiscoverySystem, EMOJI_CATALOG, type EmojiCategory } from './game/EmojiDiscoverySystem';
+import { WeatherEffects } from './game/WeatherEffects';
 
 // Set default texture scaling to nearest-neighbor for crisp pixel art
 TextureStyle.defaultOptions.scaleMode = 'nearest';
+
+// Register service worker for caching (network-first)
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
 
 // Mapbox access token - loaded from environment variable
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string;
@@ -37,21 +44,33 @@ function setupAuthUI() {
     authService.logout();
   });
 
+  const levelBadge = document.getElementById('user-level-badge');
+  const coinsBadge = document.getElementById('user-coins-badge');
+
+  const updateBadges = () => {
+    const prog = (window as any).progression;
+    if (prog) {
+      const stats = prog.getStats();
+      if (levelBadge) levelBadge.textContent = `L${stats.level}`;
+      if (coinsBadge) coinsBadge.textContent = `💰 ${stats.totalCoins}`;
+    }
+  };
+  setInterval(updateBadges, 5000);
+
   // Update UI based on auth state
   authService.onAuthChange((user: User | null) => {
     if (user) {
-      // Always show both login button and user info
-      // If guest, show login button to upgrade to Google account
-      // If authenticated, show login button is hidden via CSS or can be used to switch accounts
       if (user.isGuest) {
         loginContainer.style.display = 'flex';
+        logoutBtn.style.display = 'none';
       } else {
         loginContainer.style.display = 'none';
+        logoutBtn.style.display = 'block';
       }
       userContainer.style.display = 'flex';
       userAvatar.src = user.avatarUrl || '';
       userName.textContent = user.name || 'User';
-      updateCoinDisplay();
+      updateBadges();
     } else {
       loginContainer.style.display = 'flex';
       userContainer.style.display = 'none';
@@ -329,9 +348,7 @@ async function main() {
   const achievements = new AchievementSystem();
   (window as any).achievements = achievements;
 
-  // Initialize daily rewards
-  const dailyRewards = new DailyRewardSystem();
-  (window as any).dailyRewards = dailyRewards;
+  // Daily rewards removed
 
   // Initialize weather system
   const { weatherSystem } = await import('./game/WeatherSystem');
@@ -345,20 +362,8 @@ async function main() {
   const { leaderboardSystem } = await import('./game/LeaderboardSystem');
   (window as any).leaderboardSystem = leaderboardSystem;
 
-  // Setup player stats UI
-  setupPlayerStatsUI(progression);
-
-  // Setup achievements UI
-  setupAchievementsUI(achievements, progression);
-
-  // Setup daily rewards UI
-  setupDailyRewardsUI(dailyRewards, progression);
-
-  // Setup weather UI
-  setupWeatherUI();
-
-  // Setup leaderboard UI
-  setupLeaderboardUI();
+  // Setup unified settings (cog icon + tabbed modal) and compact weather
+  setupSettingsAndWeather(progression, achievements);
 
   // Wait for map to load
   mapManager.onLoad(async () => {
@@ -375,398 +380,114 @@ async function main() {
   });
 }
 
-function setupPlayerStatsUI(progression: ProgressionSystem) {
-  const statsPanel = document.getElementById('player-stats');
-  if (!statsPanel) return;
+function setupSettingsAndWeather(progression: ProgressionSystem, achievements: AchievementSystem): void {
+  const zoneTopRight = document.getElementById('zone-top-right');
+  if (!zoneTopRight) return;
 
-  // Show stats panel when logged in
-  authService.onAuthChange((user) => {
-    if (user) {
-      statsPanel.style.display = 'block';
-      updatePlayerStatsDisplay(progression);
-    } else {
-      statsPanel.style.display = 'none';
-    }
-  });
-
-  // Update stats display every second
-  let currentUser: User | null = null;
-  authService.onAuthChange((user) => {
-    currentUser = user;
-  });
-
-  setInterval(() => {
-    if (currentUser) {
-      updatePlayerStatsDisplay(progression);
-    }
-  }, 1000);
-}
-
-function updatePlayerStatsDisplay(progression: ProgressionSystem) {
-  const stats = progression.getStats();
-
-  const levelEl = document.getElementById('player-level');
-  const xpEl = document.getElementById('player-xp');
-  const xpNextEl = document.getElementById('player-xp-next');
-  const xpBarFill = document.getElementById('xp-bar-fill');
-  const coinsEl = document.getElementById('player-coins-stat');
-  const resourcesEl = document.getElementById('player-resources');
-  const buildingsEl = document.getElementById('player-buildings');
-  const missionsEl = document.getElementById('player-missions');
-
-  if (levelEl) levelEl.textContent = stats.level.toString();
-  if (xpEl) xpEl.textContent = stats.xp.toString();
-  if (xpNextEl) xpNextEl.textContent = stats.xpToNextLevel.toString();
-  if (xpBarFill) {
-    const percent = (stats.xp / stats.xpToNextLevel) * 100;
-    xpBarFill.style.width = `${percent}%`;
-  }
-  if (coinsEl) coinsEl.textContent = stats.totalCoins.toString();
-  if (resourcesEl) resourcesEl.textContent = stats.totalResourcesCollected.toString();
-  if (buildingsEl) buildingsEl.textContent = stats.totalBuildingsPlaced.toString();
-  if (missionsEl) missionsEl.textContent = stats.totalMissionsCompleted.toString();
-}
-
-function setupAchievementsUI(achievements: AchievementSystem, progression: ProgressionSystem): void {
-  const achievementsBtn = document.getElementById('achievements-btn');
-  const achievementsPanel = document.getElementById('achievements-panel');
-  const closeBtn = document.getElementById('close-achievements');
-  const achievementsList = document.getElementById('achievements-list');
-  const achievementCount = document.getElementById('achievement-count');
-  const achievementProgressFill = document.getElementById('achievement-progress-fill');
-
-  if (!achievementsBtn || !achievementsPanel || !closeBtn || !achievementsList) return;
-
-  // Open achievements panel
-  achievementsBtn.addEventListener('click', () => {
-    achievementsPanel.style.display = 'block';
-    updateAchievementsList();
-  });
-
-  // Close achievements panel
-  closeBtn.addEventListener('click', () => {
-    achievementsPanel.style.display = 'none';
-  });
-
-  function updateAchievementsList(): void {
-    const allAchievements = achievements.getAchievements();
-    achievementsList!.innerHTML = '';
-
-    allAchievements.forEach(ach => {
-      const item = document.createElement('div');
-      item.className = `achievement-item ${ach.unlocked ? 'unlocked' : 'locked'}`;
-
-      item.innerHTML = `
-        <div class="achievement-icon">${ach.icon}</div>
-        <div class="achievement-info">
-          <div class="achievement-name">${ach.name}</div>
-          <div class="achievement-description">${ach.description}</div>
-          <div class="achievement-reward">
-            <span>💰 ${ach.coinReward}</span>
-            <span>⭐ ${ach.xpReward} XP</span>
-          </div>
-        </div>
-        ${ach.unlocked ? '<div class="achievement-unlocked-badge">Unlocked</div>' : ''}
-      `;
-
-      achievementsList!.appendChild(item);
-    });
-
-    // Update progress
-    if (achievementCount) {
-      achievementCount.textContent = `${achievements.getUnlockedCount()}/${achievements.getTotalCount()}`;
-    }
-    if (achievementProgressFill) {
-      achievementProgressFill.style.width = `${achievements.getProgress()}%`;
-    }
-  }
-
-  // Check achievements periodically
-  setInterval(() => {
-    const stats = progression.getStats();
-    const newAchievements = achievements.checkAchievements({
-      resources: stats.totalResourcesCollected,
-      buildings: stats.totalBuildingsPlaced,
-      missions: stats.totalMissionsCompleted,
-      level: stats.level,
-      distance: 0, // TODO: Track distance
-      coins: stats.totalCoins,
-    });
-
-    // Show notifications for new achievements
-    newAchievements.forEach(ach => {
-      notificationSystem.show(`🏆 Achievement Unlocked: ${ach.name}!`, 'levelup');
-      progression.addXP(ach.xpReward);
-      // TODO: Add coins to player account
-    });
-  }, 2000);
-
-  // Setup settings menu
-  setupSettingsMenu();
-}
-
-function setupDailyRewardsUI(dailyRewards: DailyRewardSystem, progression: ProgressionSystem): void {
-  const modal = document.getElementById('daily-reward-modal');
-  const claimBtn = document.getElementById('claim-reward-btn');
-  const closeBtn = document.getElementById('close-daily-reward');
-  const streakCount = document.getElementById('streak-count');
-  const rewardCoins = document.getElementById('reward-coins');
-  const rewardXP = document.getElementById('reward-xp');
-  const rewardBonus = document.getElementById('reward-bonus');
-
-  if (!modal || !claimBtn || !closeBtn) return;
-
-  // Only show daily reward if user is authenticated and can claim
-  const user = authService.getUser();
-  if (!user) {
-    // Hide modal for unauthenticated users
-    modal.style.display = 'none';
-    return;
-  }
-
-  // Check if user can claim daily reward
-  if (dailyRewards.canClaimToday()) {
-    // Show modal after a short delay
-    setTimeout(() => {
-      const nextReward = dailyRewards.getNextReward();
-      if (streakCount) streakCount.textContent = nextReward.day.toString();
-      if (rewardCoins) rewardCoins.textContent = nextReward.coins.toString();
-      if (rewardXP) rewardXP.textContent = nextReward.xp.toString();
-
-      if (nextReward.bonus && rewardBonus) {
-        rewardBonus.textContent = nextReward.bonus;
-        rewardBonus.style.display = 'block';
-      } else if (rewardBonus) {
-        rewardBonus.style.display = 'none';
-      }
-
-      modal.style.display = 'flex';
-    }, 2000);
-  }
-
-  // Claim reward
-  claimBtn.addEventListener('click', () => {
-    const reward = dailyRewards.claimDailyReward();
-    if (reward) {
-      progression.addXP(reward.xp);
-      notificationSystem.show(`🎁 Daily Reward: +${reward.coins} coins, +${reward.xp} XP!`, 'coin');
-      // TODO: Add coins to player account
-      modal.style.display = 'none';
-    }
-  });
-
-  // Close modal
-  closeBtn.addEventListener('click', () => {
-    modal.style.display = 'none';
-  });
-}
-
-function setupWeatherUI(): void {
-  // Create weather indicator in bottom-right corner
-  const weatherIndicator = document.createElement('div');
-  weatherIndicator.id = 'weather-indicator';
-  weatherIndicator.style.cssText = `
-    position: fixed;
-    bottom: 80px;
-    right: 20px;
-    background: rgba(0, 0, 0, 0.7);
-    color: white;
-    padding: 10px 15px;
-    border-radius: 8px;
-    font-size: 14px;
-    z-index: 1000;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    backdrop-filter: blur(10px);
-  `;
-  document.body.appendChild(weatherIndicator);
-
-  // Update weather display
-  function updateWeatherDisplay() {
-    const weatherSystem = (window as any).weatherSystem;
-    if (!weatherSystem) return;
-
-    const weather = weatherSystem.getCurrentWeather();
-    weatherIndicator.innerHTML = `
-      <span style="font-size: 20px;">${weather.emoji}</span>
-      <div>
-        <div style="font-weight: bold;">${weather.name}</div>
-        <div style="font-size: 11px; opacity: 0.8;">${weather.description}</div>
-      </div>
-    `;
-  }
-
-  updateWeatherDisplay();
-  setInterval(updateWeatherDisplay, 5000);
-}
-
-function setupLeaderboardUI(): void {
-  // Create leaderboard button
-  const leaderboardBtn = document.createElement('button');
-  leaderboardBtn.id = 'leaderboard-btn';
-  leaderboardBtn.innerHTML = '🏆';
-  leaderboardBtn.title = 'Leaderboard';
-  leaderboardBtn.style.cssText = `
-    position: fixed;
-    top: 20px;
-    left: 280px;
-    width: 40px;
-    height: 40px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border: none;
-    border-radius: 50%;
-    font-size: 20px;
-    cursor: pointer;
-    z-index: 1000;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    transition: transform 0.2s;
-  `;
-  leaderboardBtn.addEventListener('mouseenter', () => {
-    leaderboardBtn.style.transform = 'scale(1.1)';
-  });
-  leaderboardBtn.addEventListener('mouseleave', () => {
-    leaderboardBtn.style.transform = 'scale(1)';
-  });
-  document.body.appendChild(leaderboardBtn);
-
-  // Create leaderboard panel
-  const leaderboardPanel = document.createElement('div');
-  leaderboardPanel.id = 'leaderboard-panel';
-  leaderboardPanel.style.cssText = `
-    display: none;
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 90%;
-    max-width: 500px;
-    max-height: 80vh;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border-radius: 16px;
-    padding: 20px;
-    z-index: 10001;
-    overflow-y: auto;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-  `;
-  leaderboardPanel.innerHTML = `
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-      <h2 style="margin: 0; color: white;">🏆 Leaderboard</h2>
-      <button id="close-leaderboard" style="background: rgba(255,255,255,0.2); border: none; color: white; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; font-size: 18px;">×</button>
-    </div>
-    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-      <button class="leaderboard-tab active" data-type="level">Level</button>
-      <button class="leaderboard-tab" data-type="coins">Coins</button>
-      <button class="leaderboard-tab" data-type="resources">Resources</button>
-    </div>
-    <div id="leaderboard-list" style="background: rgba(0,0,0,0.3); border-radius: 8px; padding: 10px;"></div>
-    <div id="player-rank" style="margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 8px; color: white; text-align: center;"></div>
-  `;
-  document.body.appendChild(leaderboardPanel);
-
-  let currentType = 'level';
-
-  // Tab switching
-  leaderboardPanel.querySelectorAll('.leaderboard-tab').forEach(tab => {
-    tab.addEventListener('click', async () => {
-      leaderboardPanel.querySelectorAll('.leaderboard-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      currentType = tab.getAttribute('data-type') || 'level';
-      await updateLeaderboard();
-    });
-  });
-
-  // Open/close
-  leaderboardBtn.addEventListener('click', async () => {
-    leaderboardPanel.style.display = 'block';
-    await updateLeaderboard();
-  });
-
-  const closeBtn = leaderboardPanel.querySelector('#close-leaderboard');
-  closeBtn?.addEventListener('click', () => {
-    leaderboardPanel.style.display = 'none';
-  });
-
-  async function updateLeaderboard() {
-    const leaderboardSystem = (window as any).leaderboardSystem;
-    if (!leaderboardSystem) return;
-
-    const list = document.getElementById('leaderboard-list');
-    const rankEl = document.getElementById('player-rank');
-    if (!list) return;
-
-    list.innerHTML = '<div style="color: white; text-align: center;">Loading...</div>';
-
-    const [entries, playerRank] = await Promise.all([
-      leaderboardSystem.getLeaderboard(currentType, 10),
-      leaderboardSystem.getPlayerRank(currentType)
-    ]);
-
-    list.innerHTML = entries.map((entry: any, index: number) => `
-      <div style="display: flex; justify-content: space-between; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 6px; margin-bottom: 8px; color: white;">
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <span style="font-weight: bold; font-size: 18px;">${index + 1}</span>
-          <div>
-            <div style="font-weight: bold;">${entry.username || 'Player'}</div>
-            <div style="font-size: 12px; opacity: 0.8;">Level ${entry.level}</div>
-          </div>
-        </div>
-        <div style="font-weight: bold; font-size: 18px;">
-          ${currentType === 'level' ? `Lvl ${entry.level}` :
-            currentType === 'coins' ? `${entry.total_coins} 💰` :
-            currentType === 'resources' ? `${entry.total_resources_collected} 🌳` :
-            `${entry.total_buildings_placed} 🏗️`}
-        </div>
-      </div>
-    `).join('');
-
-    if (rankEl && playerRank) {
-      rankEl.innerHTML = `Your Rank: #${playerRank}`;
-    }
-  }
-}
-
-function setupSettingsMenu(): void {
-  // Create settings button
+  // --- Settings cog button (rightmost) ---
   const settingsBtn = document.createElement('button');
   settingsBtn.id = 'settings-btn';
   settingsBtn.textContent = '⚙️';
-  settingsBtn.style.cssText = `
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    background: rgba(0, 0, 0, 0.8);
-    color: white;
-    border: 2px solid rgba(255, 255, 255, 0.3);
-    border-radius: 50%;
-    width: 50px;
-    height: 50px;
-    font-size: 24px;
-    cursor: pointer;
-    z-index: 1000;
-    transition: all 0.2s;
-  `;
-  settingsBtn.onmouseenter = () => {
-    settingsBtn.style.background = 'rgba(0, 0, 0, 0.95)';
-    settingsBtn.style.transform = 'scale(1.1)';
-  };
-  settingsBtn.onmouseleave = () => {
-    settingsBtn.style.background = 'rgba(0, 0, 0, 0.8)';
-    settingsBtn.style.transform = 'scale(1)';
-  };
-  document.body.appendChild(settingsBtn);
+  settingsBtn.className = 'action-btn';
+  zoneTopRight.appendChild(settingsBtn);
 
-  // Create settings modal
-  const modal = document.createElement('div');
-  modal.id = 'settings-modal';
+  // --- Missions button (below settings) ---
+  const missionsBtn = document.createElement('button');
+  missionsBtn.id = 'missions-btn';
+  missionsBtn.textContent = '🎯';
+  missionsBtn.className = 'action-btn';
+  missionsBtn.style.position = 'relative';
+  zoneTopRight.appendChild(missionsBtn);
+
+  // Missions badge
+  const missionsBadge = document.createElement('span');
+  missionsBadge.id = 'missions-badge';
+  missionsBadge.style.cssText = 'position:absolute;top:-4px;right:-4px;background:#ef4444;color:white;font-size:10px;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;';
+  missionsBadge.textContent = '3';
+  missionsBtn.appendChild(missionsBadge);
+
+  missionsBtn.addEventListener('click', () => {
+    showMissionsModal();
+  });
+
+  // --- Weather circle button (stacked emoji + temp) ---
+  const weatherEl = document.createElement('div');
+  weatherEl.id = 'weather-indicator';
+  weatherEl.className = 'action-btn';
+  weatherEl.style.cssText = `
+    flex-direction: column;
+    gap: 0;
+    line-height: 1;
+    cursor: pointer;
+    font-size: 12px;
+  `;
+  weatherEl.innerHTML = '<span style="font-size:14px;line-height:1;">☀️</span><span style="font-size:10px;">18°C</span>';
+
+  weatherEl.addEventListener('click', () => showWeatherModal(getTemperature));
+  zoneTopRight.appendChild(weatherEl);
+
+  // Temperature simulation (fluctuates throughout the day)
+  const getTemperature = () => {
+    const hour = new Date().getHours();
+    const base = 16;
+    const amplitude = 8;
+    const offset = Math.sin((hour - 5) / 24 * 2 * Math.PI) * amplitude;
+    // Deterministic "variance" based on the current hour (same for all players)
+    const dayOfYear = Math.floor(Date.now() / 86400000);
+    const variance = ((dayOfYear * 7 + hour * 13) % 5) - 2; // -2 to +2
+    return Math.round(base + offset + variance);
+  };
+
+  // Weather visual effects
+  const weatherEffects = new WeatherEffects();
+  (window as any).weatherEffects = weatherEffects;
+
+  // Update weather periodically
+  const updateWeather = async () => {
+    const ws = (window as any).weatherSystem;
+    const temp = getTemperature();
+    if (ws) {
+      const weather = ws.getCurrentWeather();
+      if (weather) {
+        weatherEl.innerHTML = `<span style="font-size:14px;line-height:1;">${weather.emoji}</span><span style="font-size:10px;color:rgba(255,255,255,0.8);">${temp}°C</span>`;
+        // Sync visual effects with weather type
+        weatherEffects.setWeather(weather.type);
+        return;
+      }
+    }
+    weatherEl.innerHTML = `<span style="font-size:14px;line-height:1;">☀️</span><span style="font-size:10px;">${temp}°C</span>`;
+    weatherEffects.setWeather('clear');
+  };
+  setInterval(updateWeather, 10000);
+  setTimeout(updateWeather, 1000);
+
+  // Dev mode: weather test panel (only on localhost)
+  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+    const devPanel = document.createElement('div');
+    devPanel.style.cssText = 'position:fixed;bottom:10px;left:50%;transform:translateX(-50%);z-index:99999;display:flex;gap:4px;background:rgba(0,0,0,0.8);padding:6px 10px;border-radius:10px;';
+    ['clear', 'rain', 'snow', 'fog', 'storm'].forEach(type => {
+      const btn = document.createElement('button');
+      btn.textContent = { clear: '☀️', rain: '🌧️', snow: '❄️', fog: '🌫️', storm: '⛈️' }[type] || type;
+      btn.style.cssText = 'background:rgba(255,255,255,0.15);border:none;color:white;padding:4px 8px;border-radius:6px;cursor:pointer;font-size:14px;';
+      btn.addEventListener('click', () => {
+        const ws = (window as any).weatherSystem;
+        if (ws) {
+          ws.forceWeatherChange(type);
+          updateWeather();
+        }
+      });
+      devPanel.appendChild(btn);
+    });
+    document.body.appendChild(devPanel);
+  }
+
+  // --- Settings modal with tabs ---
+  const modal = document.getElementById('settings-modal')!;
   modal.style.cssText = `
     display: none;
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.8);
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.4);
     z-index: 10000;
     justify-content: center;
     align-items: center;
@@ -774,102 +495,512 @@ function setupSettingsMenu(): void {
 
   const panel = document.createElement('div');
   panel.style.cssText = `
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    background: rgba(25, 25, 35, 0.55);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 20px;
-    padding: 30px;
-    max-width: 600px;
-    width: 90%;
-    max-height: 80vh;
-    overflow-y: auto;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    padding: 0;
+    max-width: 500px;
+    width: 92%;
+    max-height: 85vh;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    color: white;
+    display: flex;
+    flex-direction: column;
   `;
 
-  panel.innerHTML = `
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-      <h2 style="margin: 0; color: white; font-size: 24px;">⚙️ Settings</h2>
-      <button id="close-settings" style="background: none; border: none; color: white; font-size: 30px; cursor: pointer; padding: 0; width: 40px; height: 40px;">×</button>
-    </div>
-
-    <div style="margin-bottom: 30px;">
-      <h3 style="color: white; margin-bottom: 15px;">🎭 Character Customization</h3>
-      <div id="character-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(50px, 1fr)); gap: 8px; max-height: 300px; overflow-y: auto; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 10px;"></div>
-      <button id="randomize-character" style="margin-top: 10px; padding: 10px 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%;">🎲 Randomize</button>
-    </div>
+  // Tab bar (horizontally scrollable)
+  const tabBar = document.createElement('div');
+  tabBar.style.cssText = `
+    display: flex;
+    overflow-x: auto;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    flex-shrink: 0;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
   `;
+  const tabs = [
+    { id: 'skins', label: '👤 Skins' },
+    { id: 'missions', label: '🎯 Missions' },
+    { id: 'codex', label: '📖 Emoji-pedia' },
+    { id: 'achievements', label: '🏆 Achievements' },
+    { id: 'profile', label: '📊 Stats' },
+  ];
 
-  modal.appendChild(panel);
-  document.body.appendChild(modal);
+  const tabContent = document.createElement('div');
+  tabContent.style.cssText = `flex: 1; overflow-y: auto; padding: 16px;`;
 
-  // Load character grid
-  const grid = panel.querySelector('#character-grid') as HTMLElement;
-  const savedSprite = localStorage.getItem('gallax_player_sprite');
-  const currentSprite = savedSprite ? parseInt(savedSprite, 10) : 1;
+  // Close button
+  const closeRow = document.createElement('div');
+  closeRow.style.cssText = `display:flex;justify-content:flex-end;padding:8px 12px 0;flex-shrink:0;`;
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = '✕';
+  closeBtn.style.cssText = `background:rgba(255,255,255,0.1);border:none;color:white;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:18px;`;
+  closeBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+  closeRow.appendChild(closeBtn);
 
-  for (let i = 1; i <= 125; i++) {
+  let activeTab = 'skins';
+
+  tabs.forEach(tab => {
     const btn = document.createElement('button');
+    btn.textContent = tab.label;
+    btn.dataset.tab = tab.id;
     btn.style.cssText = `
-      width: 50px;
-      min-height: 50px;
-      border: 3px solid ${i === currentSprite ? '#667eea' : 'transparent'};
-      border-radius: 8px;
+      flex-shrink: 0;
+      padding: 10px 16px;
+      border: none;
       background: transparent;
+      color: rgba(255,255,255,0.5);
+      font-size: 13px;
       cursor: pointer;
-      padding: 4px;
-      transition: all 0.2s;
-      display: flex;
-      align-items: flex-end;
-      justify-content: center;
+      border-bottom: 2px solid transparent;
+      white-space: nowrap;
     `;
-    btn.innerHTML = `<img src="/sprites/${i}.png" style="width: 100%; height: auto; image-rendering: pixelated; display: block;" />`;
-    btn.onclick = async () => {
-      // Update sprite in real-time
-      const game = (window as any).game;
-      if (game) {
-        await game.changePlayerSprite(i);
-        notificationSystem.show(`✨ Character changed!`, 'coin');
-      }
-
-      // Update all borders
-      grid.querySelectorAll('button').forEach((b, idx) => {
-        (b as HTMLElement).style.border = `3px solid ${idx + 1 === i ? '#667eea' : 'transparent'}`;
+    btn.addEventListener('click', () => {
+      activeTab = tab.id;
+      tabBar.querySelectorAll('button').forEach(b => {
+        (b as HTMLElement).style.color = 'rgba(255,255,255,0.5)';
+        (b as HTMLElement).style.borderBottomColor = 'transparent';
       });
-    };
-    grid.appendChild(btn);
+      btn.style.color = 'white';
+      btn.style.borderBottomColor = '#6366f1';
+      renderTabContent(tab.id);
+    });
+    if (tab.id === activeTab) {
+      btn.style.color = 'white';
+      btn.style.borderBottomColor = '#6366f1';
+    }
+    tabBar.appendChild(btn);
+  });
+
+  panel.appendChild(closeRow);
+  panel.appendChild(tabBar);
+  panel.appendChild(tabContent);
+  modal.appendChild(panel);
+
+  // Open modal
+  settingsBtn.addEventListener('click', () => {
+    modal.style.display = 'flex';
+    renderTabContent(activeTab);
+  });
+
+  // Close on backdrop click
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.style.display = 'none';
+  });
+
+  function renderTabContent(tabId: string) {
+    switch (tabId) {
+      case 'skins': renderSkinsTab(); break;
+      case 'missions': renderMissionsTab(); break;
+      case 'codex': renderCodexTab(); break;
+      case 'achievements': renderAchievementsTab(); break;
+      case 'profile': renderProfileTab(); break;
+    }
   }
 
-  // Randomize button
-  const randomizeBtn = panel.querySelector('#randomize-character') as HTMLButtonElement;
-  randomizeBtn.onclick = async () => {
-    const random = Math.floor(Math.random() * 125) + 1;
+  function renderMissionsTab() {
+    const tracker = document.getElementById('active-missions-tracker');
+    const activeMissions = tracker?.innerHTML || '';
+    const hasActive = activeMissions.trim().length > 0;
 
-    // Update sprite in real-time
-    const game = (window as any).game;
-    if (game) {
-      await game.changePlayerSprite(random);
-      notificationSystem.show(`🎲 Character randomized!`, 'coin');
+    tabContent.innerHTML = `
+      <h3 style="margin:0 0 12px;font-size:16px;">🎯 Active Missions</h3>
+      ${hasActive ? activeMissions : '<p style="opacity:0.5;font-size:13px;margin-bottom:16px;">No active missions right now.</p>'}
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.08);">
+        <div style="font-size:13px;font-weight:500;margin-bottom:8px;">📍 Visit landmarks to find missions:</div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <div style="font-size:12px;opacity:0.7;">🏛️ The Metropolitan Museum of Art</div>
+          <div style="font-size:12px;opacity:0.7;">🌃 Times Square</div>
+          <div style="font-size:12px;opacity:0.7;">🌳 Central Park</div>
+          <div style="font-size:12px;opacity:0.7;">🗽 Statue of Liberty</div>
+          <div style="font-size:12px;opacity:0.7;">🌉 Brooklyn Bridge</div>
+          <div style="font-size:12px;opacity:0.7;">🏙️ Empire State Building</div>
+          <div style="font-size:12px;opacity:0.7;">🎭 Broadway</div>
+          <div style="font-size:12px;opacity:0.7;">🏟️ Madison Square Garden</div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderCodexTab() {
+    const discovery: EmojiDiscoverySystem = (window as any).emojiDiscovery;
+    if (!discovery) {
+      tabContent.innerHTML = '<p style="opacity:0.6">Start playing to discover emojis!</p>';
+      return;
     }
 
-    grid.querySelectorAll('button').forEach((b, idx) => {
-      (b as HTMLElement).style.border = `3px solid ${idx + 1 === random ? '#667eea' : 'transparent'}`;
-    });
-  };
+    const progress = discovery.getAllCategoryProgress();
+    const total = discovery.getTotalCount();
+    const found = discovery.getDiscoveredCount();
+    const pct = total > 0 ? Math.round((found / total) * 100) : 0;
 
-  // Open/close modal
-  settingsBtn.onclick = () => {
-    modal.style.display = 'flex';
-  };
+    const CATEGORY_NAMES: Record<string, string> = {
+      japanese: '🈹 Japanese', mystical: '🔮 Mystical', nature: '🌿 Nature',
+      marine: '🐟 Marine', creatures: '🦊 Creatures', food: '🍕 Food',
+      buildings: '🏠 Buildings', transport: '🚕 Transport', celestial: '☀️ Celestial',
+      tools: '🔨 Tools', music: '🎷 Music', sports: '⚾ Sports',
+      hearts: '❤️ Hearts', symbols: '💎 Symbols',
+    };
+    const RARITY_COLORS: Record<string, string> = {
+      common: '#9ca3af', uncommon: '#22c55e', rare: '#3b82f6', epic: '#a855f7', legendary: '#f59e0b',
+    };
 
-  const closeBtn = panel.querySelector('#close-settings') as HTMLButtonElement;
-  closeBtn.onclick = () => {
-    modal.style.display = 'none';
-  };
+    let html = `
+      <div style="margin-bottom:16px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:5px;">
+          <span>${found} / ${total} discovered</span>
+          <span style="color:#f59e0b;font-weight:bold;">${pct}%</span>
+        </div>
+        <div style="width:100%;height:6px;background:rgba(255,255,255,0.2);border-radius:3px;overflow:hidden;">
+          <div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#f59e0b,#ef4444);border-radius:3px;"></div>
+        </div>
+      </div>
+    `;
 
-  modal.onclick = (e) => {
-    if (e.target === modal) {
-      modal.style.display = 'none';
+    for (const catProgress of progress) {
+      const catName = CATEGORY_NAMES[catProgress.category] || catProgress.category;
+      const catEmojis = discovery.getByCategory(catProgress.category as EmojiCategory);
+
+      html += `
+        <div style="margin-bottom:12px;background:rgba(255,255,255,0.05);border-radius:8px;padding:10px;">
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+            <span style="font-weight:bold;font-size:13px;">${catName}</span>
+            <span style="font-size:11px;opacity:0.7;">${catProgress.discovered}/${catProgress.total}</span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:3px;">
+      `;
+      for (const entry of catEmojis) {
+        const isFound = discovery.isDiscovered(entry.emoji);
+        const rarityColor = RARITY_COLORS[entry.rarity];
+        html += `<span title="${isFound ? `${entry.name}: ${entry.meaning}` : '???'}" style="
+          font-size:18px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;
+          border-radius:4px;border:1px solid ${isFound ? rarityColor : 'rgba(255,255,255,0.1)'};
+          background:${isFound ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.3)'};
+          ${isFound ? '' : 'filter:grayscale(1) brightness(0.3);'}
+        ">${entry.emoji}</span>`;
+      }
+      html += '</div></div>';
     }
-  };
+
+    tabContent.innerHTML = html;
+  }
+
+  function renderAchievementsTab() {
+    const allAch = achievements.getAchievements();
+    let html = '';
+    for (const ach of allAch) {
+      html += `
+        <div style="display:flex;gap:10px;padding:10px;margin-bottom:8px;background:rgba(255,255,255,${ach.unlocked ? '0.08' : '0.03'});border-radius:8px;${ach.unlocked ? '' : 'opacity:0.5;'}">
+          <span style="font-size:24px;">${ach.icon}</span>
+          <div style="flex:1;">
+            <div style="font-weight:bold;font-size:13px;">${ach.name}</div>
+            <div style="font-size:11px;opacity:0.7;">${ach.description}</div>
+            ${ach.unlocked ? '<div style="font-size:10px;color:#22c55e;margin-top:2px;">✅ Unlocked</div>' : ''}
+          </div>
+          <div style="font-size:11px;opacity:0.5;text-align:right;">
+            <div>💰 ${ach.coinReward}</div>
+            <div>⭐ ${ach.xpReward} XP</div>
+          </div>
+        </div>
+      `;
+    }
+    tabContent.innerHTML = html || '<p style="opacity:0.6">No achievements yet.</p>';
+  }
+
+  function renderProfileTab() {
+    const stats = progression.getStats();
+    const user = authService.getUser();
+    const pct = stats.xpToNextLevel > 0 ? Math.round((stats.xp / stats.xpToNextLevel) * 100) : 0;
+
+    tabContent.innerHTML = `
+      <div style="text-align:center;margin-bottom:20px;">
+        ${user?.avatarUrl ? `<img src="${user.avatarUrl}" style="width:48px;height:48px;border-radius:50%;margin-bottom:8px;">` : ''}
+        <div style="font-size:18px;font-weight:bold;">${user?.name || 'Guest'}</div>
+        <div style="font-size:12px;opacity:0.6;">${user?.isGuest ? 'Guest Player' : user?.email || ''}</div>
+      </div>
+      <div style="background:rgba(255,255,255,0.05);border-radius:10px;padding:12px;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span>⭐ Level ${stats.level}</span>
+          <span style="font-size:12px;opacity:0.7;">${stats.xp} / ${stats.xpToNextLevel} XP</span>
+        </div>
+        <div style="width:100%;height:6px;background:rgba(255,255,255,0.2);border-radius:3px;overflow:hidden;">
+          <div style="width:${pct}%;height:100%;background:#6366f1;border-radius:3px;"></div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div style="background:rgba(255,255,255,0.05);border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:20px;">🌳</div>
+          <div style="font-size:16px;font-weight:bold;">${stats.totalResourcesCollected}</div>
+          <div style="font-size:11px;opacity:0.6;">Resources</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.05);border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:20px;">🏠</div>
+          <div style="font-size:16px;font-weight:bold;">${stats.totalBuildingsPlaced}</div>
+          <div style="font-size:11px;opacity:0.6;">Buildings</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.05);border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:20px;">🎯</div>
+          <div style="font-size:16px;font-weight:bold;">${stats.totalMissionsCompleted}</div>
+          <div style="font-size:11px;opacity:0.6;">Missions</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.05);border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:20px;">💰</div>
+          <div style="font-size:16px;font-weight:bold;">${stats.totalCoins}</div>
+          <div style="font-size:11px;opacity:0.6;">Coins</div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderSkinsTab() {
+    const currentSprite = parseInt(localStorage.getItem('gallax_player_sprite') || '1');
+    tabContent.innerHTML = `
+      <div style="font-size:13px;margin-bottom:10px;opacity:0.6;">Tap a character to change your skin</div>
+      <div id="settings-sprite-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(44px,1fr));gap:3px;max-height:60vh;overflow-y:auto;"></div>
+    `;
+
+    const grid = document.getElementById('settings-sprite-grid');
+    if (grid) {
+      for (let i = 1; i <= 125; i++) {
+        const btn = document.createElement('button');
+        const isSelected = i === currentSprite;
+        btn.style.cssText = `
+          aspect-ratio:1;width:100%;
+          border:${isSelected ? '2px solid #6366f1' : 'none'};
+          border-radius:4px;
+          background:${isSelected ? 'rgba(99,102,241,0.2)' : 'transparent'};
+          cursor:pointer;padding:2px;
+        `;
+        btn.innerHTML = `<img src="/sprites/${i}.png" loading="lazy" style="width:100%;height:100%;image-rendering:pixelated;object-fit:contain;">`;
+        btn.addEventListener('click', () => {
+          const game = (window as any).game;
+          if (game?.changePlayerSprite) {
+            game.changePlayerSprite(i);
+            localStorage.setItem('gallax_player_sprite', i.toString());
+            renderSkinsTab();
+          }
+        });
+        grid.appendChild(btn);
+      }
+    }
+  }
 }
 
-main().catch(console.error);
+function showMissionsModal(): void {
+  document.getElementById('missions-modal')?.remove();
 
+  const overlay = document.createElement('div');
+  overlay.id = 'missions-modal';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:10000;display:flex;justify-content:center;align-items:center;';
+
+  const panel = document.createElement('div');
+  panel.className = 'glass';
+  panel.style.cssText = 'border-radius:20px;padding:0;max-width:420px;width:92%;max-height:80vh;overflow:hidden;display:flex;flex-direction:column;border:1px solid rgba(255,255,255,0.08);box-shadow:0 8px 32px rgba(0,0,0,0.2);';
+
+  // Header
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.08);flex-shrink:0;';
+  header.innerHTML = '<span style="font-size:16px;font-weight:600;color:white;">🎯 Missions</span>';
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = '✕';
+  closeBtn.style.cssText = 'background:rgba(255,255,255,0.1);border:none;color:white;width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:16px;';
+  closeBtn.addEventListener('click', () => overlay.remove());
+  header.appendChild(closeBtn);
+  panel.appendChild(header);
+
+  // Tabs
+  const tabBar = document.createElement('div');
+  tabBar.style.cssText = 'display:flex;border-bottom:1px solid rgba(255,255,255,0.08);flex-shrink:0;';
+
+  const tabs = [
+    { id: 'life', label: '🏠 Life Missions' },
+    { id: 'world', label: '🌍 World Missions' },
+    { id: 'completed', label: '✅ Completed' },
+  ];
+
+  const content = document.createElement('div');
+  content.style.cssText = 'flex:1;overflow-y:auto;padding:12px;color:white;';
+
+  let activeTab = 'life';
+
+  function renderTab(tabId: string) {
+    const lifeMissions = (window as any).lifeMissions;
+
+    if (tabId === 'life') {
+      if (!lifeMissions) {
+        content.innerHTML = '<p style="opacity:0.5;font-size:13px;">Loading missions...</p>';
+        return;
+      }
+      const active = lifeMissions.getActiveMissions();
+      if (active.length === 0) {
+        content.innerHTML = '<p style="opacity:0.5;font-size:13px;">🎉 All life missions complete!</p>';
+        return;
+      }
+      content.innerHTML = active.map((m: any) => {
+        const progress = lifeMissions.getProgress(m.id);
+        const pct = progress.target > 0 ? Math.min(100, Math.round((progress.current / progress.target) * 100)) : 0;
+        return `
+          <div style="background:rgba(255,255,255,0.05);border-radius:10px;padding:12px;margin-bottom:8px;border:1px solid rgba(255,255,255,0.06);">
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+              <span style="font-size:20px;">${m.emoji}</span>
+              <div style="flex:1;">
+                <div style="font-weight:600;font-size:13px;">${m.title}</div>
+                <div style="font-size:11px;opacity:0.6;">${m.description}</div>
+              </div>
+              <span style="font-size:11px;color:#fbbf24;">+${m.reward.xp} XP</span>
+            </div>
+            <div style="width:100%;height:4px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden;">
+              <div style="width:${pct}%;height:100%;background:#3b82f6;border-radius:2px;transition:width 0.3s;"></div>
+            </div>
+            <div style="font-size:10px;opacity:0.5;margin-top:3px;">${progress.current} / ${progress.target}</div>
+          </div>
+        `;
+      }).join('');
+    } else if (tabId === 'world') {
+      content.innerHTML = `
+        <p style="opacity:0.5;font-size:13px;margin-bottom:12px;">Visit landmarks to find world missions!</p>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <div style="font-size:12px;opacity:0.7;">🏛️ The Metropolitan Museum of Art</div>
+          <div style="font-size:12px;opacity:0.7;">🌃 Times Square</div>
+          <div style="font-size:12px;opacity:0.7;">🌳 Central Park</div>
+          <div style="font-size:12px;opacity:0.7;">🗽 Statue of Liberty</div>
+          <div style="font-size:12px;opacity:0.7;">🌉 Brooklyn Bridge</div>
+          <div style="font-size:12px;opacity:0.7;">🏙️ Empire State Building</div>
+          <div style="font-size:12px;opacity:0.7;">🎭 Broadway</div>
+          <div style="font-size:12px;opacity:0.7;">🏟️ Madison Square Garden</div>
+        </div>
+      `;
+    } else if (tabId === 'completed') {
+      if (!lifeMissions) {
+        content.innerHTML = '<p style="opacity:0.5;">No completed missions yet.</p>';
+        return;
+      }
+      const completed = lifeMissions.getCompletedMissions();
+      if (completed.length === 0) {
+        content.innerHTML = '<p style="opacity:0.5;font-size:13px;">No completed missions yet.</p>';
+        return;
+      }
+      content.innerHTML = completed.map((c: any) => `
+        <div style="display:flex;gap:8px;align-items:center;padding:8px;margin-bottom:4px;opacity:0.6;">
+          <span style="font-size:16px;">${c.mission.emoji}</span>
+          <div style="flex:1;">
+            <div style="font-size:12px;">${c.mission.title}</div>
+          </div>
+          <span style="font-size:10px;color:#22c55e;">✅</span>
+        </div>
+      `).join('');
+    }
+  }
+
+  tabs.forEach(tab => {
+    const btn = document.createElement('button');
+    btn.textContent = tab.label;
+    btn.style.cssText = `flex:1;padding:8px;border:none;background:transparent;color:${tab.id === activeTab ? 'white' : 'rgba(255,255,255,0.4)'};font-size:12px;cursor:pointer;border-bottom:2px solid ${tab.id === activeTab ? '#3b82f6' : 'transparent'};`;
+    btn.addEventListener('click', () => {
+      activeTab = tab.id;
+      tabBar.querySelectorAll('button').forEach(b => {
+        (b as HTMLElement).style.color = 'rgba(255,255,255,0.4)';
+        (b as HTMLElement).style.borderBottomColor = 'transparent';
+      });
+      btn.style.color = 'white';
+      btn.style.borderBottomColor = '#3b82f6';
+      renderTab(tab.id);
+    });
+    tabBar.appendChild(btn);
+  });
+
+  panel.appendChild(tabBar);
+  panel.appendChild(content);
+  overlay.appendChild(panel);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  renderTab(activeTab);
+}
+
+function showWeatherModal(getTemp: () => number): void {
+  document.getElementById('weather-modal')?.remove();
+
+  const ws = (window as any).weatherSystem;
+  if (!ws) return;
+  const weather = ws.getCurrentWeather();
+  const temp = getTemp();
+  const hour = new Date().getHours();
+  const isDaytime = hour >= 6 && hour < 20;
+
+  // Simulated environmental stats
+  const humidity = 40 + Math.floor(Math.random() * 40);
+  const wind = Math.floor(Math.random() * 25);
+  const visibility = weather.type === 'fog' ? '2 km' : weather.type === 'storm' ? '5 km' : '15 km';
+  const sunrise = '6:15 AM';
+  const sunset = '7:42 PM';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'weather-modal';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:10000;display:flex;justify-content:center;align-items:center;';
+
+  const panel = document.createElement('div');
+  panel.className = 'glass';
+  panel.style.cssText = 'border-radius:20px;padding:24px;max-width:320px;width:90%;color:white;border:1px solid rgba(255,255,255,0.08);box-shadow:0 8px 32px rgba(0,0,0,0.2);';
+
+  panel.innerHTML = `
+    <div style="text-align:center;margin-bottom:16px;">
+      <div style="font-size:48px;">${weather.emoji}</div>
+      <div style="font-size:24px;font-weight:700;">${temp}°C</div>
+      <div style="font-size:14px;opacity:0.7;">${weather.name}</div>
+    </div>
+
+    <div style="background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.3);border-radius:10px;padding:10px;margin-bottom:14px;">
+      <div style="font-size:12px;font-weight:600;color:#60a5fa;margin-bottom:4px;">⚡ Gameplay Effects</div>
+      <div style="font-size:12px;opacity:0.8;">${weather.description}</div>
+      ${weather.xpMultiplier > 1 ? `<div style="font-size:11px;color:#fbbf24;margin-top:4px;">XP Multiplier: ${weather.xpMultiplier}x</div>` : ''}
+      ${weather.resourceBonus ? `<div style="font-size:11px;color:#22c55e;margin-top:2px;">${weather.resourceBonus.type} spawn rate: ${weather.resourceBonus.multiplier}x</div>` : ''}
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
+      <div style="background:rgba(255,255,255,0.05);border-radius:8px;padding:8px;text-align:center;">
+        <div style="font-size:10px;opacity:0.5;">Humidity</div>
+        <div style="font-size:14px;">${humidity}%</div>
+      </div>
+      <div style="background:rgba(255,255,255,0.05);border-radius:8px;padding:8px;text-align:center;">
+        <div style="font-size:10px;opacity:0.5;">Wind</div>
+        <div style="font-size:14px;">${wind} km/h</div>
+      </div>
+      <div style="background:rgba(255,255,255,0.05);border-radius:8px;padding:8px;text-align:center;">
+        <div style="font-size:10px;opacity:0.5;">Visibility</div>
+        <div style="font-size:14px;">${visibility}</div>
+      </div>
+      <div style="background:rgba(255,255,255,0.05);border-radius:8px;padding:8px;text-align:center;">
+        <div style="font-size:10px;opacity:0.5;">Time</div>
+        <div style="font-size:14px;">${isDaytime ? '☀️ Day' : '🌙 Night'}</div>
+      </div>
+    </div>
+
+    <div style="background:rgba(255,255,255,0.05);border-radius:8px;padding:8px;display:flex;justify-content:space-between;font-size:12px;opacity:0.6;">
+      <span>🌅 ${sunrise}</span>
+      <span>🌇 ${sunset}</span>
+    </div>
+  `;
+
+  overlay.appendChild(panel);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+// Update missions badge count
+function updateMissionsBadge(): void {
+  const badge = document.getElementById('missions-badge');
+  const lifeMissions = (window as any).lifeMissions;
+  if (badge && lifeMissions) {
+    const active = lifeMissions.getActiveMissions();
+    badge.textContent = active.length.toString();
+    badge.style.display = active.length > 0 ? 'flex' : 'none';
+  }
+}
+
+// Periodically update badge
+setInterval(updateMissionsBadge, 5000);
+
+main().catch(console.error);

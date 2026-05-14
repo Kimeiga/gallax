@@ -23,6 +23,11 @@ Thumbs.db
 .wrangler/
 .dev.vars
 
+# Local tooling state (Claude Code, agents)
+.claude/
+.agents/
+skills-lock.json
+
 # Logs
 *.log
 wrangler-*.log

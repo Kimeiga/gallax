@@ -53,14 +53,14 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     
     // Get player info
     const player = await env.DB.prepare(`
-      SELECT id, email, name, avatar_url, resources, coins, lng, lat, created_at
+      SELECT id, email, name, avatar_url, resources, coins, lng, lat, is_admin, created_at
       FROM players WHERE id = ?
-    `).bind(session.player_id).first<Player & { coins: number }>();
-    
+    `).bind(session.player_id).first<Player & { coins: number; is_admin: number }>();
+
     if (!player) {
       return Response.json({ error: 'Player not found' }, { status: 404 });
     }
-    
+
     return Response.json({
       id: player.id,
       email: player.email,
@@ -70,6 +70,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       coins: player.coins || 0,
       lng: player.lng,
       lat: player.lat,
+      isAdmin: player.is_admin === 1,
       createdAt: player.created_at,
     });
   } catch (err) {

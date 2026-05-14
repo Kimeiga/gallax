@@ -53,6 +53,12 @@ export class MapManager {
     this.events[event].push(callback as any);
   }
 
+  off<K extends keyof MapEvents>(event: K, callback: MapEvents[K]): void {
+    const arr = this.events[event] as any[];
+    const idx = arr.indexOf(callback);
+    if (idx !== -1) arr.splice(idx, 1);
+  }
+
   getMap(): mapboxgl.Map {
     return this.map;
   }
@@ -99,7 +105,23 @@ export class MapManager {
     if (this.map.loaded()) {
       callback();
     } else {
-      this.map.on('load', callback);
+      let called = false;
+      const callOnce = () => {
+        if (!called) {
+          called = true;
+          callback();
+        }
+      };
+      this.map.on('load', callOnce);
+      // Also listen for 'idle' as fallback (fires when map finishes rendering)
+      this.map.on('idle', callOnce);
+      // Timeout fallback - if map never fully loads (e.g. WebKit issues), start game anyway
+      setTimeout(() => {
+        if (!called) {
+          console.warn('⚠️ Map load timeout - starting game anyway');
+          callOnce();
+        }
+      }, 8000);
     }
   }
 

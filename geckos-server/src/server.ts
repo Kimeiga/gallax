@@ -9,6 +9,8 @@ interface Player {
   lng: number;
   lat: number;
   name: string;
+  currentHome: string | null;
+  homeSprite: number;
 }
 
 interface Building {
@@ -27,6 +29,7 @@ const collectedResources = new Map<string, number>(); // resourceId -> timestamp
 const buildings = new Map<string, Building>();
 const channels = new Map<string, ServerChannel>();
 const lastProcessedSeq = new Map<string, number>(); // playerId -> last sequence number
+const authToPlayer = new Map<string, string>(); // authId -> playerId (for session dedup)
 
 const RESOURCE_RESPAWN_TIME = 5 * 60 * 1000; // 5 minutes
 const SNAPSHOT_RATE = 15; // 15 snapshots per second (~66ms)
@@ -80,21 +83,32 @@ const openRelayIceServers = [
 ];
 
 // Create geckos.io server with TURN servers for reliable connectivity
-// On Vultr VPS, we have full UDP port access - no need for multiplex
 const io: GeckosServer = geckos({
   iceServers: openRelayIceServers,
   cors: {
     origin: '*',
     allowAuthorization: true
   },
-  // Bind to 0.0.0.0 to accept connections from anywhere
   bindAddress: '0.0.0.0',
-  // On traditional VPS, use port range for better WebRTC connectivity
   portRange: {
     min: 10000,
     max: 20000
-  }
+  },
+  // ordered: true improves iOS Safari WebRTC data channel compatibility
+  ordered: true,
 });
+
+/**
+ * Safe emit wrapper — catches per-channel send failures (e.g. iOS Safari
+ * disconnecting mid-broadcast) so one broken channel doesn't kill everyone.
+ */
+function safeEmit(emitter: any, event: string, data: any, opts?: any): void {
+  try {
+    emitter.emit(event, data, opts);
+  } catch (err: any) {
+    console.warn(`⚠️ Emit "${event}" failed: ${err.message || err}`);
+  }
+}
 
 io.addServer(server);
 
@@ -163,7 +177,7 @@ function createSnapshot() {
 setInterval(() => {
   if (players.size > 0) {
     const snapshot = createSnapshot();
-    io.emit('snapshot', snapshot, { reliable: false });
+    safeEmit(io,'snapshot', snapshot, { reliable: false });
   }
 }, 1000 / SNAPSHOT_RATE);
 
@@ -175,7 +189,7 @@ setInterval(() => {
 
     // Only send if we have a player and a sequence number
     if (player && typeof seq === 'number') {
-      channel.emit('position_ack', {
+      safeEmit(channel,'position_ack', {
         lng: player.lng,
         lat: player.lat,
         seq: seq,
@@ -189,34 +203,72 @@ io.onConnection((channel: ServerChannel) => {
   channels.set(playerId, channel);
   console.log(`👤 Player ${playerId} connected (${channels.size} total)`);
 
-  // Handle join - server always assigns a unique name
+  // Handle join - use client name if provided, otherwise generate one
   channel.on('join', (data: Data) => {
-    const msg = data as { spriteNum?: number; lng: number; lat: number };
+    const msg = data as { spriteNum?: number; lng: number; lat: number; name?: string; authId?: string };
 
-    // Server assigns a unique name (ignore any client-provided name)
-    const assignedName = generateUniqueRandomName();
+    const authId = msg.authId || '';
+    let resumedPosition: { lng: number; lat: number } | undefined;
+
+    // Session dedup: if this auth ID is already connected, take over that session
+    if (authId && authToPlayer.has(authId)) {
+      const oldPlayerId = authToPlayer.get(authId)!;
+      const oldPlayer = players.get(oldPlayerId);
+
+      if (oldPlayer && oldPlayerId !== playerId) {
+        console.log(`🔄 ${msg.name || 'Player'} reconnecting (auth ${authId.slice(0, 8)}...) — taking over from ${oldPlayerId}`);
+
+        // Save the old position so the new client starts where they left off
+        resumedPosition = { lng: oldPlayer.lng, lat: oldPlayer.lat };
+
+        // Disconnect the old channel
+        const oldChannel = channels.get(oldPlayerId);
+        if (oldChannel) {
+          safeEmit(oldChannel, 'session_taken_over', {}, { reliable: true });
+          try { oldChannel.close(); } catch {}
+        }
+
+        // Clean up old player
+        channels.delete(oldPlayerId);
+        players.delete(oldPlayerId);
+        lastProcessedSeq.delete(oldPlayerId);
+        safeEmit(channel.broadcast, 'player_left', { playerId: oldPlayerId }, { reliable: true });
+      }
+    }
+
+    // Use client-provided name if available, otherwise generate a unique one
+    const assignedName = msg.name || generateUniqueRandomName();
 
     const player: Player = {
       id: playerId,
       spriteNum: msg.spriteNum || Math.floor(Math.random() * 125) + 1,
-      lng: msg.lng,
-      lat: msg.lat,
+      lng: resumedPosition?.lng ?? msg.lng,
+      lat: resumedPosition?.lat ?? msg.lat,
       name: assignedName,
+      currentHome: null,
+      homeSprite: 1,
     };
     players.set(playerId, player);
+
+    // Track auth ID for future dedup
+    if (authId) {
+      authToPlayer.set(authId, playerId);
+    }
+
     cleanupExpiredResources();
 
-    // Send init (reliable) - includes the assigned name
-    channel.emit('init', {
+    // Send init (reliable) - includes the assigned name + resumed position if any
+    safeEmit(channel,'init', {
       playerId,
       players: Array.from(players.values()),
       collectedResources: Array.from(collectedResources.keys()),
       buildings: Array.from(buildings.values()),
+      resumedPosition,
     }, { reliable: true });
 
     // Notify others
-    channel.broadcast.emit('player_joined', { player }, { reliable: true });
-    console.log(`🎮 ${player.name} joined (${players.size} players)`);
+    safeEmit(channel.broadcast,'player_joined', { player }, { reliable: true });
+    console.log(`🎮 ${player.name} joined (${players.size} players)${resumedPosition ? ' [resumed]' : ''}`);
   });
 
   // Handle movement with sequence tracking for client-side prediction
@@ -240,7 +292,7 @@ io.onConnection((channel: ServerChannel) => {
     cleanupExpiredResources();
     if (!collectedResources.has(msg.resourceId)) {
       collectedResources.set(msg.resourceId, Date.now());
-      io.emit('resource_collected', { resourceId: msg.resourceId, playerId }, { reliable: true });
+      safeEmit(io,'resource_collected', { resourceId: msg.resourceId, playerId }, { reliable: true });
     }
   });
 
@@ -257,28 +309,104 @@ io.onConnection((channel: ServerChannel) => {
       rotation: 0, // Default rotation
     };
     buildings.set(building.id, building);
-    io.emit('building_placed', { building }, { reliable: true });
+    const ownerName = players.get(playerId)?.name;
+    safeEmit(io,'building_placed', { building: { ...building, ownerName } }, { reliable: true });
   });
 
-  // Handle building rotation (reliable)
+  // Handle building rotation (reliable) - ownership checked when server has the building
   channel.on('rotate_building', (data: Data) => {
     const msg = data as { buildingId: string; rotation: number };
     const building = buildings.get(msg.buildingId);
     if (building) {
+      if (building.ownerId !== playerId) return; // reject unauthorized rotation
       building.rotation = msg.rotation;
-      io.emit('building_rotated', { buildingId: msg.buildingId, rotation: msg.rotation }, { reliable: true });
     }
+    // Buildings from previous sessions aren't in memory — relay through (best-effort)
+    safeEmit(io,'building_rotated', { buildingId: msg.buildingId, rotation: msg.rotation }, { reliable: true });
   });
 
-  // Handle building movement (reliable)
+  // Handle building movement (reliable) - ownership checked when server has the building
   channel.on('move_building', (data: Data) => {
     const msg = data as { buildingId: string; lng: number; lat: number };
     const building = buildings.get(msg.buildingId);
     if (building) {
+      if (building.ownerId !== playerId) return; // reject unauthorized move
       building.lng = msg.lng;
       building.lat = msg.lat;
-      io.emit('building_moved', { buildingId: msg.buildingId, lng: msg.lng, lat: msg.lat }, { reliable: true });
     }
+    safeEmit(io,'building_moved', { buildingId: msg.buildingId, lng: msg.lng, lat: msg.lat }, { reliable: true });
+  });
+
+  // Handle building delete (reliable) - ownership checked when server has the building
+  channel.on('delete_building', (data: Data) => {
+    const msg = data as { buildingId: string };
+    const building = buildings.get(msg.buildingId);
+    if (building && building.ownerId !== playerId) return; // reject unauthorized delete
+    buildings.delete(msg.buildingId);
+    safeEmit(io,'building_deleted', { buildingId: msg.buildingId }, { reliable: true });
+  });
+
+  // Handle home style change (emoji/tint)
+  channel.on('update_home_style', (data: Data) => {
+    const msg = data as { buildingId: string; emoji?: string; tint?: string };
+    safeEmit(io,'home_style_updated', { ...msg, playerId }, { reliable: true });
+  });
+
+  // Handle mob kill (broadcast to all so other clients remove the mob)
+  channel.on('mob_killed', (data: Data) => {
+    const msg = data as { mobId: string };
+    safeEmit(io,'mob_killed', { mobId: msg.mobId, killedBy: playerId }, { reliable: true });
+  });
+
+  // Handle combat start (so others can see the combat)
+  channel.on('combat_started', (data: Data) => {
+    const msg = data as { mobId: string };
+    safeEmit(io,'combat_started', { mobId: msg.mobId, playerId }, { reliable: true });
+  });
+
+  // Handle home room presence
+  channel.on('enter_home', (data: Data) => {
+    const msg = data as { homeId: string; spriteNum: number; playerName: string };
+    const player = players.get(playerId);
+    if (player) {
+      // First, tell the entering player about everyone already in this home
+      for (const [otherPid, otherPlayer] of players) {
+        if (otherPid !== playerId && otherPlayer.currentHome === msg.homeId) {
+          safeEmit(channel,'player_entered_home', {
+            playerId: otherPid, homeId: msg.homeId,
+            spriteNum: otherPlayer.spriteNum,
+            playerName: otherPlayer.name,
+          }, { reliable: true });
+        }
+      }
+
+      // Then mark this player as in the home and broadcast to everyone
+      player.currentHome = msg.homeId;
+      player.homeSprite = msg.spriteNum;
+      safeEmit(io,'player_entered_home', {
+        playerId, homeId: msg.homeId,
+        spriteNum: msg.spriteNum, playerName: msg.playerName,
+      }, { reliable: true });
+    }
+  });
+
+  channel.on('exit_home', (data: Data) => {
+    const player = players.get(playerId);
+    if (player) {
+      const homeId = player.currentHome;
+      player.currentHome = null;
+      safeEmit(io,'player_exited_home', { playerId, homeId }, { reliable: true });
+    }
+  });
+
+  channel.on('home_move', (data: Data) => {
+    const msg = data as { homeId: string; x: number; y: number };
+    const player = players.get(playerId);
+    if (!player || player.currentHome !== msg.homeId) return;
+    // Broadcast to all players in the same home
+    safeEmit(io,'player_home_moved', {
+      playerId, homeId: msg.homeId, x: msg.x, y: msg.y,
+    }); // unreliable for smooth movement
   });
 
   // Handle name change (reliable)
@@ -287,7 +415,35 @@ io.onConnection((channel: ServerChannel) => {
     const player = players.get(playerId);
     if (player) {
       player.name = msg.name || '';
-      io.emit('player_name_changed', { playerId, name: player.name }, { reliable: true });
+      safeEmit(io,'player_name_changed', { playerId, name: player.name }, { reliable: true });
+    }
+  });
+
+  // Handle pixel drawing (reliable) - broadcast to all players
+  channel.on('pixel_place', (data: Data) => {
+    const msg = data as { x: number; y: number; color: string; authorName: string };
+    // Broadcast to everyone (including sender for confirmation)
+    safeEmit(io,'pixel_placed', {
+      x: msg.x, y: msg.y, color: msg.color,
+      authorId: playerId, authorName: msg.authorName
+    }, { reliable: true });
+  });
+
+  // Handle pixel erase (reliable)
+  channel.on('pixel_erase', (data: Data) => {
+    const msg = data as { x: number; y: number };
+    safeEmit(io,'pixel_erased', { x: msg.x, y: msg.y, authorId: playerId }, { reliable: true });
+  });
+
+  // Handle batch pixel drawing (reliable)
+  channel.on('pixel_batch', (data: Data) => {
+    const msg = data as { pixels: { x: number; y: number; color: string }[]; authorName: string };
+    if (msg.pixels && msg.pixels.length <= 500) {
+      safeEmit(io,'pixel_batch_placed', {
+        pixels: msg.pixels,
+        authorId: playerId,
+        authorName: msg.authorName,
+      }, { reliable: true });
     }
   });
 
@@ -302,17 +458,73 @@ io.onConnection((channel: ServerChannel) => {
         message: msg.message.trim().slice(0, 200), // Limit message length
         timestamp: Date.now(),
       };
-      io.emit('chat_message', chatMessage, { reliable: true });
+      safeEmit(io,'chat_message', chatMessage, { reliable: true });
       console.log(`💬 ${player.name}: ${chatMessage.message}`);
     }
   });
 
+  // Handle territory claims (reliable) - broadcast to all players
+  channel.on('territory_claim', (data: Data) => {
+    const msg = data as { cells: string[]; color: string; playerName: string };
+    const player = players.get(playerId);
+    safeEmit(io,'territory_claimed', {
+      playerId,
+      playerName: msg.playerName || player?.name || 'Unknown',
+      cells: msg.cells,
+      color: msg.color,
+    }, { reliable: true });
+  });
+
+  // Handle sprite change (reliable)
+  channel.on('change_sprite', (data: Data) => {
+    const msg = data as { spriteNum: number };
+    const player = players.get(playerId);
+    if (player) {
+      player.spriteNum = msg.spriteNum;
+      safeEmit(io,'sprite_changed', { playerId, spriteNum: msg.spriteNum }, { reliable: true });
+    }
+  });
+
+  // Handle furniture placement (reliable) - broadcast to all players
+  channel.on('furniture_placed', (data: Data) => {
+    const msg = data as { homeId: string; item: { id: string; emoji: string; x: number; y: number } };
+    const building = buildings.get(msg.homeId);
+    if (!building || building.ownerId !== playerId) return;
+    safeEmit(io,'furniture_placed', { homeId: msg.homeId, item: msg.item }, { reliable: true });
+  });
+
+  // Handle furniture deletion (reliable) - broadcast to all players
+  channel.on('furniture_deleted', (data: Data) => {
+    const msg = data as { homeId: string; furnitureId: string };
+    const building = buildings.get(msg.homeId);
+    if (!building || building.ownerId !== playerId) return;
+    safeEmit(io,'furniture_deleted', { homeId: msg.homeId, furnitureId: msg.furnitureId }, { reliable: true });
+  });
+
+  // Handle furniture movement (reliable) - broadcast to all players
+  channel.on('furniture_moved', (data: Data) => {
+    const msg = data as { homeId: string; furnitureId: string; x: number; y: number; rotation?: number; scale?: number };
+    const building = buildings.get(msg.homeId);
+    if (!building || building.ownerId !== playerId) return;
+    safeEmit(io,'furniture_moved', { homeId: msg.homeId, furnitureId: msg.furnitureId, x: msg.x, y: msg.y, rotation: msg.rotation, scale: msg.scale }, { reliable: true });
+  });
+
   // Handle disconnect
   channel.onDisconnect(() => {
+    const player = players.get(playerId);
+    // If disconnecting player was inside a home, notify others in that home
+    const homeId = player?.currentHome;
+    if (homeId) {
+      safeEmit(io,'player_exited_home', { playerId, homeId }, { reliable: true });
+    }
+    // Clean up auth mapping if this player owned it
+    for (const [authId, pid] of authToPlayer) {
+      if (pid === playerId) { authToPlayer.delete(authId); break; }
+    }
     players.delete(playerId);
     channels.delete(playerId);
-    lastProcessedSeq.delete(playerId); // Clean up sequence tracking
-    io.emit('player_left', { playerId }, { reliable: true });
+    lastProcessedSeq.delete(playerId);
+    safeEmit(io,'player_left', { playerId }, { reliable: true });
     console.log(`👋 Player ${playerId} left (${channels.size} remaining)`);
   });
 });

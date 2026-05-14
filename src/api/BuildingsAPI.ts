@@ -12,12 +12,33 @@ export interface Building {
 }
 
 class BuildingsAPI {
+  // Get auth headers and fetch options (includes guest ID + credentials for session cookies)
+  private getAuthHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {};
+    const guestId = localStorage.getItem('gallax_guest_id');
+    if (guestId) {
+      headers['X-Guest-ID'] = guestId;
+    }
+    return headers;
+  }
+
+  private getFetchOpts(): { headers: Record<string, string>; credentials: RequestCredentials } {
+    return { headers: this.getAuthHeaders(), credentials: 'include' };
+  }
+
   // Fetch all buildings from D1
   async getAll(): Promise<Building[]> {
     try {
-      const response = await fetch('/api/buildings');
+      const response = await fetch('/api/buildings', {
+        ...this.getFetchOpts(),
+      });
       if (!response.ok) {
         console.error('Failed to fetch buildings:', response.status);
+        return [];
+      }
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        console.error('Failed to fetch buildings: not JSON response');
         return [];
       }
       return await response.json();
@@ -32,7 +53,7 @@ class BuildingsAPI {
     try {
       const response = await fetch('/api/buildings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() }, credentials: 'include' as RequestCredentials,
         body: JSON.stringify(building),
       });
       if (!response.ok) {
@@ -52,7 +73,7 @@ class BuildingsAPI {
     try {
       const response = await fetch(`/api/buildings/${buildingId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() }, credentials: 'include' as RequestCredentials,
         body: JSON.stringify(updates),
       });
       if (!response.ok) {
@@ -72,6 +93,8 @@ class BuildingsAPI {
     try {
       const response = await fetch(`/api/buildings/${buildingId}`, {
         method: 'DELETE',
+        headers: this.getAuthHeaders(),
+        credentials: 'include',
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));

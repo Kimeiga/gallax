@@ -10,6 +10,7 @@ export interface User {
   lat: number;
   createdAt: string;
   isGuest?: boolean;
+  isAdmin?: boolean;
 }
 
 export type AuthCallback = (user: User | null) => void;
@@ -70,11 +71,23 @@ class AuthService {
       }
     }
 
+    // Use persisted guest name or generate a new one
+    let guestName = localStorage.getItem('gallax_guest_name');
+    if (!guestName) {
+      const adjectives = ['Swift', 'Bold', 'Brave', 'Lucky', 'Keen', 'Wild', 'Chill', 'Epic', 'Rad', 'Zen', 'Deft', 'Sly'];
+      const nouns = ['Fox', 'Owl', 'Wolf', 'Bear', 'Hawk', 'Lynx', 'Puma', 'Raven', 'Otter', 'Hare', 'Crow', 'Elk'];
+      const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+      const noun = nouns[Math.floor(Math.random() * nouns.length)];
+      const num = Math.floor(Math.random() * 99) + 1;
+      guestName = `${adj}${noun}${num}`;
+      localStorage.setItem('gallax_guest_name', guestName);
+    }
+
     return {
       id: guestId,
       email: '',
-      name: 'Guest Player',
-      avatarUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=guest',
+      name: guestName,
+      avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${guestId}`,
       resources: {},
       lng: -73.965,
       lat: 40.782,
@@ -116,8 +129,24 @@ class AuthService {
 
 
 
-  login() {
-    window.location.href = '/api/auth/google';
+  async login() {
+    // Check if server is available before redirecting
+    try {
+      const check = await fetch('/api/auth/me', { method: 'HEAD' });
+      if (check.ok || check.status === 401) {
+        window.location.href = '/api/auth/google';
+      } else {
+        throw new Error('Server unavailable');
+      }
+    } catch {
+      // Server not running - show message
+      const notificationSystem = (window as any).notificationSystem;
+      if (notificationSystem) {
+        notificationSystem.show('Server not available. Playing as guest.', 'info', 3000);
+      } else {
+        alert('Login server is not available. You can still play as a guest!');
+      }
+    }
   }
 
   async logout() {

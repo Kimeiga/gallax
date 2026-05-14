@@ -23,6 +23,7 @@ export interface NetworkBuilding {
   lng: number;
   lat: number;
   ownerId: string;
+  ownerName?: string;
   placedAt: number;
   rotation: number; // Rotation in radians
 }
@@ -49,7 +50,7 @@ interface InputRecord {
 export type PositionCorrectionCallback = (lng: number, lat: number, inputsToReapply: InputRecord[]) => void;
 
 export type MessageHandler = {
-  onInit: (playerId: string, players: NetworkPlayer[], collectedResources: string[], buildings: NetworkBuilding[]) => void;
+  onInit: (playerId: string, players: NetworkPlayer[], collectedResources: string[], buildings: NetworkBuilding[], resumedPosition?: { lng: number; lat: number }) => void;
   onPlayerJoined: (player: NetworkPlayer) => void;
   onPlayerLeft: (playerId: string) => void;
   onPlayerMoved: (playerId: string, lng: number, lat: number) => void;
@@ -58,9 +59,24 @@ export type MessageHandler = {
   onBuildingPlaced: (building: NetworkBuilding) => void;
   onBuildingRotated?: (buildingId: string, rotation: number) => void;
   onBuildingMoved?: (buildingId: string, lng: number, lat: number) => void;
+  onBuildingDeleted?: (buildingId: string) => void;
+  onHomeStyleUpdated?: (buildingId: string, emoji?: string, tint?: string) => void;
   onChatMessage?: (message: ChatMessage) => void;
   onSnapshot?: (snapshot: unknown) => void;
   onPositionCorrection?: PositionCorrectionCallback;
+  onPixelPlaced?: (x: number, y: number, color: string, authorId: string, authorName: string) => void;
+  onPixelErased?: (x: number, y: number) => void;
+  onPixelBatchPlaced?: (pixels: { x: number; y: number; color: string }[], authorId: string, authorName: string) => void;
+  onSpriteChanged?: (playerId: string, spriteNum: number) => void;
+  onFurniturePlaced?: (homeId: string, item: any) => void;
+  onFurnitureDeleted?: (homeId: string, furnitureId: string) => void;
+  onFurnitureMoved?: (homeId: string, furnitureId: string, x: number, y: number, rotation?: number, scale?: number) => void;
+  onMobKilled?: (mobId: string, killedBy: string) => void;
+  onCombatStarted?: (mobId: string, playerId: string) => void;
+  onTerritoryClaimed?: (playerId: string, playerName: string, cells: string[], color: string) => void;
+  onPlayerEnteredHome?: (playerId: string, homeId: string, spriteNum: number, playerName: string) => void;
+  onPlayerExitedHome?: (playerId: string, homeId: string) => void;
+  onPlayerHomeMoved?: (playerId: string, homeId: string, x: number, y: number) => void;
 };
 
 const SNAPSHOT_RATE = 15;
@@ -171,6 +187,19 @@ export class GeckosNetworkManager {
       this.channel.onDisconnect(() => {
         console.log('🦎 Disconnected from server');
         this.connected = false;
+
+        // Auto-reconnect after 3 seconds
+        if (this.handlers) {
+          console.log('🦎 Will attempt reconnect in 3s...');
+          setTimeout(() => {
+            if (!this.connected && this.handlers) {
+              console.log('🦎 Reconnecting...');
+              this.connect(this.handlers)
+                .then(() => console.log('🦎 Reconnected!'))
+                .catch((err) => console.error('🦎 Reconnect failed:', err));
+            }
+          }, 3000);
+        }
       });
 
       // Log raw events if available
@@ -186,9 +215,9 @@ export class GeckosNetworkManager {
     if (!this.channel || !this.handlers) return;
 
     this.channel.on('init', (data: Data) => {
-      const msg = data as { playerId: string; players: NetworkPlayer[]; collectedResources: string[]; buildings: NetworkBuilding[] };
+      const msg = data as { playerId: string; players: NetworkPlayer[]; collectedResources: string[]; buildings: NetworkBuilding[]; resumedPosition?: { lng: number; lat: number } };
       this.playerId = msg.playerId;
-      this.handlers!.onInit(msg.playerId, msg.players, msg.collectedResources, msg.buildings);
+      this.handlers!.onInit(msg.playerId, msg.players, msg.collectedResources, msg.buildings, msg.resumedPosition);
     });
 
     this.channel.on('player_joined', (data: Data) => {
@@ -230,11 +259,122 @@ export class GeckosNetworkManager {
       }
     });
 
+    this.channel.on('building_deleted', (data: Data) => {
+      const msg = data as { buildingId: string };
+      if (this.handlers!.onBuildingDeleted) {
+        this.handlers!.onBuildingDeleted(msg.buildingId);
+      }
+    });
+
+    this.channel.on('home_style_updated', (data: Data) => {
+      const msg = data as { buildingId: string; emoji?: string; tint?: string; playerId: string };
+      if (this.handlers!.onHomeStyleUpdated) {
+        this.handlers!.onHomeStyleUpdated(msg.buildingId, msg.emoji, msg.tint);
+      }
+    });
+
     // Chat messages
     this.channel.on('chat_message', (data: Data) => {
       const msg = data as ChatMessage;
       if (this.handlers!.onChatMessage) {
         this.handlers!.onChatMessage(msg);
+      }
+    });
+
+    // Pixel drawing events
+    this.channel.on('pixel_placed', (data: Data) => {
+      const msg = data as { x: number; y: number; color: string; authorId: string; authorName: string };
+      if (this.handlers!.onPixelPlaced) {
+        this.handlers!.onPixelPlaced(msg.x, msg.y, msg.color, msg.authorId, msg.authorName);
+      }
+    });
+
+    this.channel.on('pixel_erased', (data: Data) => {
+      const msg = data as { x: number; y: number };
+      if (this.handlers!.onPixelErased) {
+        this.handlers!.onPixelErased(msg.x, msg.y);
+      }
+    });
+
+    this.channel.on('pixel_batch_placed', (data: Data) => {
+      const msg = data as { pixels: { x: number; y: number; color: string }[]; authorId: string; authorName: string };
+      if (this.handlers!.onPixelBatchPlaced) {
+        this.handlers!.onPixelBatchPlaced(msg.pixels, msg.authorId, msg.authorName);
+      }
+    });
+
+    // Sprite change from other players
+    this.channel.on('sprite_changed', (data: Data) => {
+      const msg = data as { playerId: string; spriteNum: number };
+      if (this.handlers!.onSpriteChanged) {
+        this.handlers!.onSpriteChanged(msg.playerId, msg.spriteNum);
+      }
+    });
+
+    // Furniture sync events
+    this.channel.on('furniture_placed', (data: Data) => {
+      const msg = data as { homeId: string; item: any };
+      if (this.handlers!.onFurniturePlaced) {
+        this.handlers!.onFurniturePlaced(msg.homeId, msg.item);
+      }
+    });
+
+    this.channel.on('furniture_deleted', (data: Data) => {
+      const msg = data as { homeId: string; furnitureId: string };
+      if (this.handlers!.onFurnitureDeleted) {
+        this.handlers!.onFurnitureDeleted(msg.homeId, msg.furnitureId);
+      }
+    });
+
+    this.channel.on('furniture_moved', (data: Data) => {
+      const msg = data as { homeId: string; furnitureId: string; x: number; y: number; rotation?: number; scale?: number };
+      if (this.handlers!.onFurnitureMoved) {
+        this.handlers!.onFurnitureMoved(msg.homeId, msg.furnitureId, msg.x, msg.y, msg.rotation, msg.scale);
+      }
+    });
+
+    // Combat events
+    this.channel.on('mob_killed', (data: Data) => {
+      const msg = data as { mobId: string; killedBy: string };
+      if (this.handlers!.onMobKilled) {
+        this.handlers!.onMobKilled(msg.mobId, msg.killedBy);
+      }
+    });
+
+    this.channel.on('combat_started', (data: Data) => {
+      const msg = data as { mobId: string; playerId: string };
+      if (this.handlers!.onCombatStarted) {
+        this.handlers!.onCombatStarted(msg.mobId, msg.playerId);
+      }
+    });
+
+    // Territory events
+    this.channel.on('territory_claimed', (data: Data) => {
+      const msg = data as { playerId: string; playerName: string; cells: string[]; color: string };
+      if (this.handlers!.onTerritoryClaimed) {
+        this.handlers!.onTerritoryClaimed(msg.playerId, msg.playerName, msg.cells, msg.color);
+      }
+    });
+
+    // Home room presence
+    this.channel.on('player_entered_home', (data: Data) => {
+      const msg = data as { playerId: string; homeId: string; spriteNum: number; playerName: string };
+      if (this.handlers!.onPlayerEnteredHome) {
+        this.handlers!.onPlayerEnteredHome(msg.playerId, msg.homeId, msg.spriteNum, msg.playerName);
+      }
+    });
+
+    this.channel.on('player_exited_home', (data: Data) => {
+      const msg = data as { playerId: string; homeId: string };
+      if (this.handlers!.onPlayerExitedHome) {
+        this.handlers!.onPlayerExitedHome(msg.playerId, msg.homeId);
+      }
+    });
+
+    this.channel.on('player_home_moved', (data: Data) => {
+      const msg = data as { playerId: string; homeId: string; x: number; y: number };
+      if (this.handlers!.onPlayerHomeMoved) {
+        this.handlers!.onPlayerHomeMoved(msg.playerId, msg.homeId, msg.x, msg.y);
       }
     });
 
@@ -275,8 +415,8 @@ export class GeckosNetworkManager {
     return snapshot.state as unknown as Entity[];
   }
 
-  join(lng: number, lat: number, spriteNum: number, name?: string) {
-    this.channel?.emit('join', { lng, lat, spriteNum, name }, { reliable: true });
+  join(lng: number, lat: number, spriteNum: number, name?: string, authId?: string) {
+    this.channel?.emit('join', { lng, lat, spriteNum, name, authId }, { reliable: true });
   }
 
   // Record input and send move with sequence number for prediction
@@ -357,12 +497,76 @@ export class GeckosNetworkManager {
     this.channel?.emit('move_building', { buildingId, lng, lat }, { reliable: true });
   }
 
+  deleteBuilding(buildingId: string) {
+    this.channel?.emit('delete_building', { buildingId }, { reliable: true });
+  }
+
+  updateHomeStyle(buildingId: string, emoji?: string, tint?: string) {
+    this.channel?.emit('update_home_style', { buildingId, emoji, tint }, { reliable: true });
+  }
+
+  // Combat
+  notifyMobKilled(mobId: string) {
+    this.channel?.emit('mob_killed', { mobId }, { reliable: true });
+  }
+
+  notifyCombatStarted(mobId: string) {
+    this.channel?.emit('combat_started', { mobId }, { reliable: true });
+  }
+
+  // Territory
+  claimTerritory(cells: string[], color: string, playerName: string) {
+    this.channel?.emit('territory_claim', { cells, color, playerName }, { reliable: true });
+  }
+
+  // Home room presence
+  enterHome(homeId: string, spriteNum: number, playerName: string) {
+    this.channel?.emit('enter_home', { homeId, spriteNum, playerName }, { reliable: true });
+  }
+
+  exitHome() {
+    this.channel?.emit('exit_home', {}, { reliable: true });
+  }
+
+  homeMove(homeId: string, x: number, y: number) {
+    this.channel?.emit('home_move', { homeId, x, y });
+  }
+
   setName(name: string) {
     this.channel?.emit('set_name', { name }, { reliable: true });
   }
 
+  // Pixel drawing
+  placePixel(x: number, y: number, color: string, authorName: string) {
+    this.channel?.emit('pixel_place', { x, y, color, authorName }, { reliable: true });
+  }
+
+  erasePixel(x: number, y: number) {
+    this.channel?.emit('pixel_erase', { x, y }, { reliable: true });
+  }
+
+  placePixelBatch(pixels: { x: number; y: number; color: string }[], authorName: string) {
+    this.channel?.emit('pixel_batch', { pixels, authorName }, { reliable: true });
+  }
+
   sendChat(message: string) {
     this.channel?.emit('chat', { message }, { reliable: true });
+  }
+
+  changeSprite(spriteNum: number) {
+    this.channel?.emit('change_sprite', { spriteNum }, { reliable: true });
+  }
+
+  placeFurniture(homeId: string, item: { id: string; emoji: string; x: number; y: number }) {
+    this.channel?.emit('furniture_placed', { homeId, item }, { reliable: true });
+  }
+
+  deleteFurniture(homeId: string, furnitureId: string) {
+    this.channel?.emit('furniture_deleted', { homeId, furnitureId }, { reliable: true });
+  }
+
+  moveFurniture(homeId: string, furnitureId: string, x: number, y: number, rotation?: number, scale?: number) {
+    this.channel?.emit('furniture_moved', { homeId, furnitureId, x, y, rotation, scale }, { reliable: true });
   }
 
   getPlayerId(): string | null {

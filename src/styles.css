@@ -4,6 +4,11 @@
   box-sizing: border-box;
 }
 
+@keyframes station-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.9; }
+}
+
 html, body {
   width: 100%;
   height: 100%;
@@ -39,20 +44,103 @@ html, body {
   left: 0;
   width: 100%;
   height: 100%;
+  z-index: 2;
   pointer-events: none;
 }
 
-#ui {
-  position: absolute;
-  top: 55px;
-  left: 10px;
-  background: rgba(0, 0, 0, 0.7);
-  color: white;
-  padding: 8px 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  z-index: 50;
+/* === UI Zone Layout System === */
+.ui-zone {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  gap: 8px;
+  pointer-events: none;
 }
+.ui-zone > * {
+  pointer-events: auto;
+}
+.ui-zone--top-left {
+  top: 10px;
+  left: 10px;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.ui-zone--top-right {
+  top: 10px;
+  right: 10px;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.ui-zone--bottom-left {
+  bottom: 20px;
+  left: 10px;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+}
+.ui-zone--bottom-right {
+  bottom: 20px;
+  right: 10px;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+}
+
+/* === Glass UI Design System === */
+.glass {
+  background: rgba(30, 30, 40, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: white;
+}
+
+.btn-primary {
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-primary:hover { background: #2563eb; }
+.btn-primary:active { background: #1d4ed8; }
+
+/* Shared circular action button */
+.action-btn {
+  width: 40px;
+  height: 40px;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(30, 30, 40, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: white;
+  font-size: 18px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s, background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  padding: 0;
+}
+.action-btn:hover {
+  background: rgba(50, 50, 65, 0.7);
+}
+.action-btn:active {
+  background: rgba(60, 60, 75, 0.8);
+}
+.action-btn.active {
+  background: rgba(59, 130, 246, 0.6);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+/* coords display removed from UI */
 
 #ui > div {
   margin-bottom: 2px;
@@ -183,18 +271,32 @@ html, body {
   text-shadow: 0 0 10px rgba(239, 68, 68, 0.5), 0 2px 4px rgba(0, 0, 0, 0.5);
 }
 
-/* Crafting Menu */
+/* Crafting Menu - opens on right side above chat */
 #crafting-menu {
   position: fixed;
-  top: 170px;
+  bottom: 60px;
   right: 10px;
-  background: rgba(0, 0, 0, 0.85);
-  padding: 12px;
+  background: rgba(30, 30, 40, 0.6);
+  padding: 8px;
   border-radius: 12px;
   z-index: 200;
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  min-width: 150px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  min-width: 140px;
+  max-width: 200px;
+  max-height: calc(100vh - 190px);
+  overflow-y: auto;
+  display: none;
+}
+
+#crafting-menu.visible {
+  display: block;
+}
+
+/* Craft toggle button - uses .action-btn class for consistent hover/active */
+#craft-toggle-btn {
+  font-size: 20px;
 }
 
 .crafting-header {
@@ -214,8 +316,8 @@ html, body {
 .craft-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 6px;
+  padding: 7px 8px;
   border: none;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.1);
@@ -248,17 +350,17 @@ html, body {
 }
 
 .craft-emoji {
-  font-size: 24px;
+  font-size: 20px;
 }
 
 .craft-name {
   flex: 1;
   font-weight: bold;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .craft-cost {
-  font-size: 11px;
+  font-size: 10px;
   opacity: 0.8;
 }
 
@@ -284,18 +386,11 @@ html, body {
     font-size: 20px;
   }
 
-  /* Hide crafting by default on mobile - shown via toggle */
+  /* Adjust crafting for mobile */
   #crafting-menu {
-    display: none;
-    top: auto;
-    bottom: 120px;
+    bottom: 60px;
     right: 10px;
-    max-height: 180px;
-    overflow-y: auto;
-  }
-
-  #crafting-menu.visible {
-    display: block;
+    max-height: 200px;
   }
 
   /* Location UI on mobile - top left, no emojis handled in JS */
@@ -307,30 +402,9 @@ html, body {
   }
 }
 
-/* Name input UI */
-#name-input-container {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 100;
-  display: flex;
-  gap: 5px;
-}
-
-#player-name-input {
-  padding: 8px 12px;
-  font-size: 14px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.6);
-  color: white;
-  width: 150px;
-  outline: none;
-  transition: border-color 0.2s, background 0.2s;
-}
-
+/* Name modal input */
 #player-name-input:focus {
-  border-color: #667eea;
+  border-color: #3b82f6;
   background: rgba(0, 0, 0, 0.8);
 }
 
@@ -338,42 +412,19 @@ html, body {
   color: rgba(255, 255, 255, 0.5);
 }
 
-#set-name-btn {
-  padding: 8px 16px;
-  font-size: 14px;
-  border: none;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-#set-name-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-}
-
-#set-name-btn:active {
-  transform: translateY(0);
-}
-
-/* Hide name input on mobile - use prompt button instead */
-@media (pointer: coarse) {
-  #name-input-container {
-    display: none;
-  }
-}
+/* Set name button uses .btn-primary class */
 
 /* Chat UI */
 #chat-container {
-  position: absolute;
+  position: fixed;
   bottom: 10px;
-  left: 10px;
-  width: 320px;
-  max-width: calc(100% - 20px);
-  background: rgba(0, 0, 0, 0.7);
-  border-radius: 8px;
+  right: 10px;
+  width: 280px;
+  background: rgba(30, 30, 40, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -471,39 +522,15 @@ html, body {
   background: #1d4ed8;
 }
 
-@media (max-width: 768px) {
+/* Mobile adjustments */
+@media (pointer: coarse) {
   #chat-container {
-    width: calc(100% - 20px);
-    bottom: 10px;
+    bottom: 60px;
+    width: 260px;
+    max-width: calc(100% - 80px);
   }
-
   #chat-messages {
     height: 80px;
-  }
-}
-
-/* Touch devices - collapsible chat */
-@media (pointer: coarse) {
-  /* Hide chat by default on mobile - show via button */
-  #chat-container {
-    display: none;
-    bottom: 70px;
-    left: 70px; /* Left padding to avoid overlap with bottom-left buttons */
-    width: calc(100% - 90px); /* Account for left padding + right margin */
-    max-width: 350px;
-  }
-
-  /* Show chat when expanded */
-  #chat-container.expanded {
-    display: flex;
-  }
-
-  #chat-messages {
-    height: 100px;
-  }
-
-  #chat-input-row {
-    display: flex;
   }
 }
 
@@ -573,17 +600,7 @@ html, body {
 
 /* Auth UI */
 #auth-ui {
-  position: fixed;
-  top: 80px;
-  right: 10px;
-  z-index: 200;
-}
-
-@media (pointer: coarse) {
-  #auth-ui {
-    right: 10px;
-    top: 80px;
-  }
+  /* Positioned by zone container */
 }
 
 #login-container {
@@ -622,12 +639,8 @@ html, body {
 
 #user-container {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: rgba(0, 0, 0, 0.7);
-  border-radius: 20px;
-  backdrop-filter: blur(10px);
+  color: white;
+  font-size: 13px;
 }
 
 #user-avatar {
@@ -962,27 +975,26 @@ html, body {
   }
 }
 
-/* Player stats panel */
+/* Player stats panel - positioned by zone container */
 #player-stats {
-  position: absolute;
-  top: 10px;
-  left: 10px;
   background: rgba(0, 0, 0, 0.85);
   color: white;
-  padding: 15px;
-  border-radius: 12px;
-  font-size: 14px;
-  min-width: 200px;
+  padding: 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  min-width: 150px;
+  max-width: 170px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
   backdrop-filter: blur(10px);
+  z-index: 100;
 }
 
 #player-stats .stat-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin: 8px 0;
-  padding: 6px 0;
+  margin: 4px 0;
+  padding: 3px 0;
   border-bottom: 1px solid rgba(255,255,255,0.1);
 }
 
@@ -1429,6 +1441,22 @@ button:active:not(:disabled) {
 .leaderboard-tab.active {
   background: rgba(255, 255, 255, 0.3);
   font-weight: bold;
+}
+
+/* Emoji Discovery notification animation */
+@keyframes emojiDiscover {
+  0% { transform: scale(0.5) rotate(-10deg); opacity: 0; }
+  50% { transform: scale(1.3) rotate(5deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+
+.emoji-discover-anim {
+  animation: emojiDiscover 0.5s ease-out;
+}
+
+/* Emoji Codex button pulse when new discoveries */
+#emoji-codex-btn.has-new {
+  animation: glow 2s ease-in-out infinite;
 }
 
 /* Weather Indicator */

@@ -7,7 +7,27 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#000000">
-  <title>Gallax</title>
+  <title>Gallax - NYC Multiplayer Emoji MMO</title>
+  <meta name="description" content="NYC multiplayer emoji MMO game. Explore the real-world map, collect resources, build homes, fight mobs, draw pixel art, and play with friends in real-time.">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Gallax - NYC Multiplayer Emoji MMO">
+  <meta property="og:description" content="NYC multiplayer emoji MMO game. Explore, build, fight, draw, and play with friends on a real-world map.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://kimu.nyc/og-image.png">
+  <meta property="og:url" content="https://kimu.nyc">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Gallax - NYC Multiplayer Emoji MMO">
+  <meta name="twitter:description" content="NYC multiplayer emoji MMO. Explore, build, fight, and draw pixel art on a real-world map.">
+  <meta name="twitter:image" content="https://kimu.nyc/og-image.png">
+
+  <!-- PWA / App -->
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
   <link href="https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.css" rel="stylesheet">
   <link rel="stylesheet" href="/src/styles.css">
 </head>
@@ -16,84 +36,53 @@
     <div id="map"></div>
     <canvas id="game-canvas"></canvas>
   </div>
-  <div id="ui">
-    <div id="coords"></div>
-    <div id="zoom-level"></div>
-  </div>
-  <!-- Player Stats Panel -->
-  <div id="player-stats" style="display: none;">
-    <div class="stat-row">
-      <span class="stat-label">⭐ Level</span>
-      <span class="stat-value" id="player-level">1</span>
-    </div>
-    <div class="xp-bar">
-      <div class="xp-bar-fill" id="xp-bar-fill" style="width: 0%"></div>
-    </div>
-    <div class="stat-row">
-      <span class="stat-label">XP</span>
-      <span class="stat-value"><span id="player-xp">0</span> / <span id="player-xp-next">100</span></span>
-    </div>
-    <div class="stat-row">
-      <span class="stat-label">🌳 Resources</span>
-      <span class="stat-value" id="player-resources">0</span>
-    </div>
-    <div class="stat-row">
-      <span class="stat-label">🏠 Buildings</span>
-      <span class="stat-value" id="player-buildings">0</span>
-    </div>
-    <div class="stat-row">
-      <span class="stat-label">🎯 Missions</span>
-      <span class="stat-value" id="player-missions">0</span>
-    </div>
-  </div>
-  <!-- Login/User UI -->
-  <div id="auth-ui">
-    <div id="login-container">
-      <button id="google-login-btn">
-        <img src="https://www.google.com/favicon.ico" alt="Google" width="18" height="18">
-        <span>Login with Google</span>
-      </button>
-    </div>
-    <div id="user-container" style="display: none;">
-      <img id="user-avatar" src="" alt="Avatar">
-      <span id="user-name"></span>
-      <div id="coin-display">
-        <span class="coin-icon">💰</span>
-        <span id="coin-count">0</span>
-      </div>
-      <button id="achievements-btn" title="View Achievements">🏆</button>
-      <button id="logout-btn">Logout</button>
-    </div>
-  </div>
-  <!-- Daily Reward Modal -->
-  <div id="daily-reward-modal" style="display: none;">
-    <div class="modal-content">
-      <h2>🎁 Daily Login Reward!</h2>
-      <div id="daily-reward-content">
-        <div class="streak-display">
-          <span class="streak-icon">🔥</span>
-          <span id="streak-count">0</span>
-          <span class="streak-label">Day Streak</span>
+
+  <!-- === UI Zone: Top Left === -->
+  <div class="ui-zone ui-zone--top-left">
+    <div id="auth-ui">
+      <!-- Name tag with pencil edit button -->
+      <div id="user-container" class="glass" style="display:none;border-radius:12px;padding:6px 10px;">
+        <div style="display:flex;align-items:center;gap:5px;">
+          <img id="user-avatar" src="" alt="Avatar" style="width:22px;height:22px;border-radius:50%;">
+          <span id="user-name" style="font-size:14px;font-weight:500;"></span>
+          <button id="edit-name-btn" style="background:rgba(255,255,255,0.1);border:none;color:white;cursor:pointer;font-size:10px;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;margin-left:2px;transition:background 0.15s;" title="Change name" onmouseenter="this.style.background='rgba(255,255,255,0.2)'" onmouseleave="this.style.background='rgba(255,255,255,0.1)'" onmousedown="this.style.background='rgba(255,255,255,0.05)'" onmouseup="this.style.background='rgba(255,255,255,0.2)'">✏️</button>
+          <span id="user-level-badge" style="font-size:11px;color:#fbbf24;">L1</span>
+          <span id="user-coins-badge" style="font-size:11px;color:#fbbf24;">💰 0</span>
+          <button id="logout-btn" style="font-size:10px;background:none;border:none;color:rgba(255,255,255,0.3);cursor:pointer;">Logout</button>
         </div>
-        <div class="reward-display">
-          <div class="reward-item">
-            <span class="reward-icon">💰</span>
-            <span id="reward-coins">0</span>
-            <span class="reward-label">Coins</span>
-          </div>
-          <div class="reward-item">
-            <span class="reward-icon">⭐</span>
-            <span id="reward-xp">0</span>
-            <span class="reward-label">XP</span>
-          </div>
-        </div>
-        <div id="reward-bonus" style="display: none;"></div>
       </div>
-      <button id="claim-reward-btn" class="primary-btn">Claim Reward</button>
-      <button id="close-daily-reward" class="secondary-btn">Close</button>
+      <!-- Name change modal (hidden) -->
+      <div id="name-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:10000;justify-content:center;align-items:center;">
+        <div class="glass" style="border-radius:16px;padding:24px;width:280px;text-align:center;">
+          <div style="font-size:16px;font-weight:600;margin-bottom:16px;">Change Your Name</div>
+          <input type="text" id="player-name-input" placeholder="Enter name..." maxlength="20" style="width:100%;padding:10px 14px;font-size:15px;border:1px solid rgba(255,255,255,0.15);border-radius:10px;background:rgba(255,255,255,0.08);color:white;outline:none;text-align:center;box-sizing:border-box;">
+          <button id="set-name-btn" class="btn-primary" style="margin-top:12px;width:100%;padding:10px;font-size:14px;border-radius:10px;">Set Name</button>
+          <button id="cancel-name-btn" style="margin-top:8px;width:100%;padding:8px;font-size:13px;border-radius:8px;background:none;border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);cursor:pointer;">Cancel</button>
+        </div>
+      </div>
+      <!-- Login with Google -->
+      <div id="login-container" style="margin-top:6px;">
+        <button id="google-login-btn">
+          <img src="https://www.google.com/favicon.ico" alt="Google" width="18" height="18">
+          <span>Login with Google</span>
+        </button>
+      </div>
     </div>
   </div>
-  <!-- Achievements Panel -->
+
+  <!-- === UI Zone: Top Right (weather + settings, added by JS) === -->
+  <div id="zone-top-right" class="ui-zone ui-zone--top-right"></div>
+
+  <!-- === UI Zone: Bottom Left (draw toggle added by JS) === -->
+  <div id="zone-bottom-left" class="ui-zone ui-zone--bottom-left"></div>
+
+  <!-- === UI Zone: Bottom Right (craft button added by JS) === -->
+  <div id="zone-bottom-right" class="ui-zone ui-zone--bottom-right"></div>
+
+  <!-- Settings Modal (tabs: Missions, Emoji-pedia, Achievements, Profile) -->
+  <div id="settings-modal" style="display: none;"></div>
+
+  <!-- Achievements Panel (kept for data, hidden) -->
   <div id="achievements-panel" style="display: none;">
     <div class="panel-header">
       <h2>🏆 Achievements</h2>
@@ -107,6 +96,7 @@
     </div>
     <div id="achievements-list"></div>
   </div>
+
   <!-- Mission UI -->
   <div id="mission-ui" style="display: none;">
     <button id="mission-board-btn">🎯 View Missions</button>
@@ -123,11 +113,14 @@
     </div>
     <div id="mission-list"></div>
   </div>
-  <!-- Active Missions Tracker -->
   <div id="active-missions-tracker" style="display: none;"></div>
+
+  <!-- Emoji Codex Panel (used by settings modal) -->
+  <div id="emoji-codex" style="display: none;"></div>
+
   <!-- Mobile UI buttons -->
   <div id="mobile-ui-buttons"></div>
+
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
-

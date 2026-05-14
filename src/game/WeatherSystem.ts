@@ -57,42 +57,19 @@ export class WeatherSystem {
   };
 
   constructor() {
-    this.loadWeather();
+    // Always compute weather from current time period (deterministic, synced across all clients)
+    this.computeCurrentWeather();
     this.startWeatherCycle();
   }
 
-  private loadWeather(): void {
-    const saved = localStorage.getItem('gallax_current_weather');
-    if (saved) {
-      const data = JSON.parse(saved);
-      this.currentWeather = data.weather || 'clear';
-      this.lastWeatherChange = data.lastChange || Date.now();
-    }
-  }
-
-  private saveWeather(): void {
-    localStorage.setItem('gallax_current_weather', JSON.stringify({
-      weather: this.currentWeather,
-      lastChange: this.lastWeatherChange,
-    }));
-  }
-
-  private startWeatherCycle(): void {
-    setInterval(() => {
-      const now = Date.now();
-      if (now - this.lastWeatherChange >= this.weatherChangeInterval) {
-        this.changeWeather();
-      }
-    }, 60000); // Check every minute
-  }
-
-  private changeWeather(): void {
+  // Compute weather deterministically from the current time period
+  private computeCurrentWeather(): void {
+    const period = Math.floor(Date.now() / this.weatherChangeInterval);
     const weatherTypes: WeatherType[] = ['clear', 'rain', 'snow', 'fog', 'storm'];
-    const weights = [40, 25, 15, 15, 5]; // Clear is most common, storm is rare
-    
+    const weights = [40, 25, 15, 15, 5];
     const totalWeight = weights.reduce((a, b) => a + b, 0);
-    let random = Math.random() * totalWeight;
-    
+    let random = this.seededRandom(period) * totalWeight;
+
     for (let i = 0; i < weatherTypes.length; i++) {
       random -= weights[i];
       if (random <= 0) {
@@ -100,21 +77,37 @@ export class WeatherSystem {
         break;
       }
     }
-
-    this.lastWeatherChange = Date.now();
-    this.saveWeather();
-
-    // Notify about weather change
-    const effect = this.WEATHER_EFFECTS[this.currentWeather];
-    const notificationSystem = (window as any).notificationSystem;
-    if (notificationSystem) {
-      notificationSystem.show(
-        `${effect.emoji} Weather changed to ${effect.name}! ${effect.description}`,
-        'info',
-        5000
-      );
-    }
+    this.lastWeatherChange = period * this.weatherChangeInterval;
   }
+
+  private startWeatherCycle(): void {
+    setInterval(() => {
+      const prevWeather = this.currentWeather;
+      this.computeCurrentWeather();
+
+      // Notify on weather change
+      if (prevWeather !== this.currentWeather) {
+        const effect = this.WEATHER_EFFECTS[this.currentWeather];
+        const notificationSystem = (window as any).notificationSystem;
+        if (notificationSystem) {
+          notificationSystem.show(
+            `${effect.emoji} Weather changed to ${effect.name}! ${effect.description}`,
+            'info', 5000
+          );
+        }
+      }
+    }, 60000);
+  }
+
+  // Seeded random so all players get the same weather at the same time
+  private seededRandom(seed: number): number {
+    let t = seed + 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  }
+
+  // changeWeather removed - now computed deterministically in computeCurrentWeather()
 
   getCurrentWeather(): WeatherEffect {
     return this.WEATHER_EFFECTS[this.currentWeather];
@@ -135,7 +128,6 @@ export class WeatherSystem {
   forceWeatherChange(weather: WeatherType): void {
     this.currentWeather = weather;
     this.lastWeatherChange = Date.now();
-    this.saveWeather();
   }
 }
 

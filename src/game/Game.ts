@@ -15,11 +15,33 @@ import { getPerformanceManager, PerformanceManager } from './PerformanceManager'
 import { authService } from '../auth/AuthService';
 import { buildingsAPI } from '../api/BuildingsAPI';
 import { PublicSpacesManager } from './PublicSpacesManager';
-import { PublicSpace } from '../api/MissionsAPI';
 import { notificationSystem } from './NotificationSystem';
 import { DialogueUI } from './DialogueUI';
 import { NPCMissionSystem } from './NPCMissionSystem';
 import { getRandomConversation, getMissionConversation } from './DialogueSystem';
+import { EmojiDiscoverySystem } from './EmojiDiscoverySystem';
+import { MobManager, Mob } from './MobManager';
+import { PixelCanvas } from './PixelCanvas';
+import { PixelDrawUI } from './PixelDrawUI';
+import { PixelDrawingManager } from './modules/PixelDrawingManager';
+import { TerritorySystem } from './TerritorySystem';
+import { TerritoryManager } from './modules/TerritoryManager';
+import { HomeInterior } from './HomeInterior';
+import { LifeMissionSystem } from './LifeMissions';
+import { CombatSystem, CombatMob } from './CombatSystem';
+import { CombatUI } from './CombatUI';
+import { WeaponSystem } from './WeaponSystem';
+import { AdminTools } from './modules/AdminTools';
+import { StationTeleporter } from './modules/StationTeleporter';
+import { ChatManager } from './modules/ChatSystem';
+import { CraftingUIManager, CraftingUICallbacks } from './modules/CraftingUI';
+import {
+  BuildingActionState, BuildingDeps,
+  showBuildingActions, showHomeStylePicker, selectBuildingForRotation,
+  handleBuildingPlacement, showWaterBlockedFeedback, showCollectFeedback,
+  showPlacementHint, hidePlacementHint, deselectBuilding,
+  updateRotationHandlePosition, updateMoveHandlePosition,
+} from './modules/BuildingActions';
 
 export class Game {
   private app: Application;
@@ -42,7 +64,7 @@ export class Game {
   private crafting: CraftingSystem;
   private collectedResourceIds: Set<string> = new Set(); // Track globally collected resources
   private playerSpriteNum: number;
-  private isPlacingBuilding = false;
+  private isAdmin = false;
   private lastPositionSent = { lng: 0, lat: 0 };
   private positionSendThrottle = 50; // ms between position updates
   private lastPositionSendTime = 0;
@@ -54,28 +76,59 @@ export class Game {
   private currentInput = { x: 0, y: 0 };
   private currentDeltaTime = 0;
 
-  // Chat
-  private chatMessages: ChatMessage[] = [];
-  private maxChatMessages = 50;
+  // Pixel drawing (r/place)
+  private pixelCanvas: PixelCanvas | null = null;
+  private pixelDrawUI: PixelDrawUI | null = null;
+  private pixelDrawingManager: PixelDrawingManager | null = null;
 
-  // Building rotation and movement
-  private selectedBuildingId: string | null = null;
-  private rotationHandleEl: HTMLElement | null = null;
+  // Territory
+  private territoryManager: TerritoryManager | null = null;
+
+  // Home interior
+  private homeInterior: HomeInterior | null = null;
+
+  // Combat
+  private mobManager: MobManager | null = null;
+  private combatSystem: CombatSystem | null = null;
+  private combatUI: CombatUI | null = null;
+  private weaponSystem: WeaponSystem | null = null;
 
   // NPC Dialogue and Missions
   private dialogueUI: DialogueUI;
   private npcMissionSystem: NPCMissionSystem;
+  private emojiDiscovery: EmojiDiscoverySystem;
   private currentDialogueNPCId: string | null = null; // Track which NPC is in dialogue
-  private moveHandleEl: HTMLElement | null = null;
-  private rotationLineEl: HTMLElement | null = null;
-  private buildingGlowEl: HTMLElement | null = null;
-  private isRotating = false;
-  private isMovingBuilding = false;
-  private rotationStartAngle = 0;
-  private buildingStartRotation = 0;
-  private moveStartScreenPos: { x: number; y: number } | null = null;
-  private buildingStartPos: { lng: number; lat: number } | null = null;
-  private boundUpdateGizmoPosition: (() => void) | null = null;
+
+  // Extracted modules
+  private chatManager: ChatManager | null = null;
+  private adminTools: AdminTools | null = null;
+  private craftingUI: CraftingUIManager | null = null;
+  private stationTeleporter: StationTeleporter | null = null;
+
+  // Proximity interaction prompts
+  private proximityPromptEl: HTMLDivElement | null = null;
+  private currentProximityNPC: NPC | null = null;
+  private currentProximityMob: Mob | null = null;
+  private readonly INTERACT_RADIUS = 0.0004; // ~40m in lng/lat units
+
+  // Building action state (shared with BuildingActions module)
+  private buildingActionState: BuildingActionState = {
+    selectedBuildingId: null,
+    rotationHandleEl: null,
+    moveHandleEl: null,
+    rotationLineEl: null,
+    buildingGlowEl: null,
+    isRotating: false,
+    isMovingBuilding: false,
+    rotationStartAngle: 0,
+    buildingStartRotation: 0,
+    moveStartScreenPos: null,
+    buildingStartPos: null,
+    boundUpdateGizmoPosition: null,
+    isPlacingBuilding: false,
+    isAdmin: false,
+    _deleteHandleEl: null,
+  };
 
   constructor(mapManager: MapManager) {
     this.mapManager = mapManager;
@@ -87,6 +140,8 @@ export class Game {
     this.performanceManager = getPerformanceManager();
     this.dialogueUI = new DialogueUI();
     this.npcMissionSystem = new NPCMissionSystem();
+    this.emojiDiscovery = new EmojiDiscoverySystem();
+    (window as any).emojiDiscovery = this.emojiDiscovery;
 
     // Load saved sprite number from localStorage, or generate a random one
     const savedSpriteNum = localStorage.getItem('gallax_player_sprite');
@@ -131,28 +186,155 @@ export class Game {
     // Create player at map center with saved sprite
     const center = this.mapManager.getCenter();
     this.player = new Player(this.mapManager, center.lng, center.lat);
-    await this.player.init(this.app, this.playerSpriteNum);
 
-    // Initialize resource manager
+    // Initialize managers (non-blocking constructors)
     this.resourceManager = new ResourceManager(this.mapManager, this.app);
-
-    // Initialize NPC manager
     this.npcManager = new NPCManager(this.mapManager, this.app);
-    await this.npcManager.loadTextures();
-
-    // Initialize water entity manager (fish and boats)
     this.waterEntityManager = new WaterEntityManager(this.mapManager, this.app);
-
-    // Initialize terrain entity manager (all terrain-based entities)
     this.terrainEntityManager = new TerrainEntityManager(this.mapManager, this.app);
-
-    // Initialize multiplayer managers
     this.otherPlayers = new OtherPlayersManager(this.mapManager, this.app);
     this.buildingManager = new BuildingManager(this.mapManager, this.app);
-
-    // Initialize public spaces manager
     this.publicSpacesManager = new PublicSpacesManager(this.mapManager, this.app);
-    await this.publicSpacesManager.loadPublicSpaces();
+
+    // Parallelize async loads (player sprite, NPC textures, public spaces)
+    await Promise.all([
+      this.player.init(this.app, this.playerSpriteNum),
+      this.npcManager.loadTextures(),
+      this.publicSpacesManager.loadPublicSpaces(),
+    ]);
+
+    // Initialize combat systems
+    this.mobManager = new MobManager(this.mapManager, this.app);
+    const progression = (window as any).progression;
+    const playerLevel = progression?.getStats?.()?.level || 1;
+    this.weaponSystem = new WeaponSystem(this.inventory, playerLevel);
+    this.combatSystem = new CombatSystem(this.inventory, progression);
+    this.combatUI = new CombatUI();
+
+    // Set equipment bonuses on combat system
+    if (this.weaponSystem) {
+      const stats = this.weaponSystem.getCombinedStats();
+      this.combatSystem.setEquipmentBonuses({
+        damage: stats.damage,
+        defense: stats.defense,
+        maxHp: 0,
+        attackSpeed: stats.speed - 1.0, // speed is a multiplier, convert to bonus
+      });
+    }
+
+    // Init player combat stats
+    this.player?.initCombatStats(playerLevel);
+
+    // Setup combat callbacks
+    this.setupCombatCallbacks();
+
+    // Initialize pixel drawing canvas (r/place)
+    this.pixelCanvas = new PixelCanvas(this.mapManager);
+    this.pixelDrawUI = new PixelDrawUI();
+    this.pixelDrawingManager = new PixelDrawingManager(
+      this.pixelCanvas, this.pixelDrawUI, this.network, this.mapManager,
+    );
+    await this.pixelDrawingManager.init();
+
+    // Initialize territory manager
+    this.territoryManager = new TerritoryManager(
+      this.mapManager,
+      this.network,
+      this.inventory,
+      this.inputManager,
+      () => this.player,
+      () => {
+        const user = authService.getUser();
+        return user?.id || this.network.getPlayerId() || 'local';
+      },
+      () => this.playerName || authService.getUser()?.name || 'Explorer',
+    );
+    await this.territoryManager.init();
+    if (this.buildingManager) this.territoryManager.setBuildingManager(this.buildingManager);
+
+    // Initialize station teleporter
+    this.stationTeleporter = new StationTeleporter(
+      this.mapManager,
+      () => this.player,
+      this.network,
+      () => this.sendPositionUpdate(),
+    );
+
+    // Initialize home interior
+    this.homeInterior = new HomeInterior();
+    this.homeInterior.setNetworkCallbacks({
+      onFurniturePlaced: (homeId, item) => this.network.placeFurniture(homeId, item),
+      onFurnitureDeleted: (homeId, furnitureId) => this.network.deleteFurniture(homeId, furnitureId),
+      onFurnitureMoved: (homeId, furnitureId, x, y, rotation, scale) => this.network.moveFurniture(homeId, furnitureId, x, y, rotation, scale),
+    });
+
+    // Admin mode setup
+    this.isAdmin = authService.getUser()?.isAdmin === true;
+    this.buildingActionState.isAdmin = this.isAdmin;
+    if (this.isAdmin) {
+      this.adminTools = new AdminTools(this.mapManager, this.buildingManager!, this.inventory, this.network);
+      this.adminTools.createUI();
+    }
+
+    // Life missions
+    const lifeMissions = new LifeMissionSystem();
+    (window as any).lifeMissions = lifeMissions;
+
+    // Check mission progress periodically
+    setInterval(() => {
+      const user = authService.getUser();
+      const prog = (window as any).progression;
+      if (!prog) return;
+      const stats = prog.getStats();
+      const items = this.inventory.getAll();
+      const resourcesCollected: Record<string, number> = {};
+      items.forEach((v: number, k: string) => { resourcesCollected[k] = v; });
+
+      const hasHome = (() => {
+        const buildings = this.buildingManager?.getBuildings();
+        if (!buildings) return false;
+        for (const b of buildings.values()) {
+          if (b.type === 'my_home' && b.ownerId === (user?.id || 'local')) return true;
+        }
+        return false;
+      })();
+
+      const completed = lifeMissions.checkProgress({
+        resourcesCollected,
+        buildingsPlaced: stats.totalBuildingsPlaced,
+        hasHome,
+        hasEnteredHome: !!localStorage.getItem('gallax_entered_home'),
+        mobsKilled: parseInt(localStorage.getItem('gallax_mobs_killed') || '0'),
+        level: stats.level,
+        weaponsCrafted: this.weaponSystem ? this.weaponSystem.getCraftedItems().length : 0,
+        pixelsDrawn: this.pixelCanvas?.getPixelCount() || 0,
+        emojisDiscovered: (window as any).emojiDiscovery?.getDiscoveredCount() || 0,
+        hasChangedName: !!localStorage.getItem('gallax_guest_name'),
+        hasChangedSkin: !!localStorage.getItem('gallax_player_sprite'),
+        landmarksVisited: 0,
+        totalResourcesCollected: stats.totalResourcesCollected,
+        totalDistance: stats.totalDistanceTraveled || 0,
+      });
+
+      // Award rewards for completed missions
+      for (const mission of completed) {
+        const reward = lifeMissions.completeMission(mission.id);
+        if (reward) {
+          if (reward.xp > 0 && prog) {
+            const result = prog.addXP(reward.xp);
+            notificationSystem.show(`🎯 Mission complete: ${mission.title}! +${reward.xp} XP`, 'xp');
+            if (result.leveledUp) notificationSystem.showLevelUp(result.newLevel);
+          }
+        }
+      }
+    }, 5000);
+    this.homeInterior.onExit(() => {
+      // Show the map again
+      const gameContainer = document.getElementById('game-container');
+      if (gameContainer) gameContainer.style.display = '';
+      // Broadcast that we left
+      this.network.exitHome();
+    });
 
     // Wait for map to load style, then spawn everything
     this.mapManager.onLoad(() => {
@@ -161,6 +343,7 @@ export class Game {
       this.npcManager?.spawnNPCsInView();
       this.waterEntityManager?.spawnEntitiesInView();
       this.terrainEntityManager?.spawnEntitiesInView();
+      this.mobManager?.spawnMobsInView();
     });
 
     // Sync sprites when map moves/zooms
@@ -168,9 +351,24 @@ export class Game {
       this.player?.updatePosition();
       this.resourceManager?.updateAllPositions();
       this.npcManager?.updateAllPositions();
+      this.mobManager?.updateAllPositions();
+      this.pixelDrawingManager?.flushRender();
+      this.territoryManager?.flushRender();
       this.waterEntityManager?.updateAllPositions();
       this.terrainEntityManager?.updateAllPositions();
       this.otherPlayers?.updateAllPositions();
+
+      // Track mob health bar position during combat
+      if (this.combatSystem?.getState() === 'IN_COMBAT' && this.combatUI) {
+        const mob = this.combatSystem.getMob();
+        if (mob) {
+          const mobObj = this.mobManager?.getMob(mob.id);
+          if (mobObj) {
+            const sp = this.mapManager.project({ lng: mobObj.lng, lat: mobObj.lat });
+            this.combatUI.updateMobPosition(sp.x, sp.y);
+          }
+        }
+      }
       this.buildingManager?.updateAllPositions();
       this.publicSpacesManager?.updateAllPositions();
     });
@@ -184,6 +382,7 @@ export class Game {
       this.npcManager?.cullDistantNPCs();
       this.waterEntityManager?.cullDistantEntities();
       this.terrainEntityManager?.cullDistantEntities();
+      this.mobManager?.cullDistantMobs();
 
       // Only spawn new entities when zoomed in enough
       if (this.performanceManager.shouldSpawnEntities(zoom)) {
@@ -191,6 +390,7 @@ export class Game {
         this.npcManager?.spawnNPCsInView();
         this.waterEntityManager?.spawnEntitiesInView();
         this.terrainEntityManager?.spawnEntitiesInView();
+        this.mobManager?.spawnMobsInView();
       }
     });
 
@@ -217,18 +417,28 @@ export class Game {
       this.npcMissionSystem.updateProgress(inventoryData);
     });
 
-    // Setup crafting UI
-    this.createCraftingUI();
-    this.inventory.onChange(() => this.updateCraftingUI());
+    // Setup crafting UI (delegated to CraftingUIManager)
+    const craftingCallbacks: CraftingUICallbacks = {
+      getBuildingManager: () => this.buildingManager,
+      getMapManager: () => this.mapManager,
+      setPlacingBuilding: (placing: boolean) => { this.buildingActionState.isPlacingBuilding = placing; },
+      isPlacingBuilding: () => this.buildingActionState.isPlacingBuilding,
+      showPlacementHint: (emoji: string, name: string) => showPlacementHint(emoji, name),
+      hidePlacementHint: () => hidePlacementHint(),
+    };
+    this.craftingUI = new CraftingUIManager(
+      this.crafting, this.inventory, this.weaponSystem, this.combatSystem, this.isAdmin, craftingCallbacks
+    );
+    this.craftingUI.createUI();
+    this.inventory.onChange(() => this.craftingUI?.updateBuildingTab());
 
     // Setup name input UI
     this.createNameInputUI();
 
-    // Setup chat UI
-    this.createChatUI();
-
-    // Setup mobile UI (toggle buttons, fullscreen, etc.)
-    this.createMobileUI();
+    // Setup chat UI (delegated to ChatManager)
+    this.chatManager = new ChatManager(this.network, this.playerName, () => this.isMobile());
+    this.chatManager.createUI();
+    this.chatManager.createChatButton();
 
     // Handle window resize
     window.addEventListener('resize', () => {
@@ -236,11 +446,14 @@ export class Game {
       this.mapManager.resize();
     });
 
-    // Connect to multiplayer server
-    await this.connectToServer();
+    // Connect to multiplayer server and load buildings in background (don't block game start)
+    // Load buildings from D1 first (authoritative source), then connect to multiplayer
+    await this.loadBuildingsFromD1().catch(err => console.log('Building load failed:', err));
 
-    // Load persistent buildings from D1 (if logged in)
-    await this.loadBuildingsFromD1();
+    // Spawn player at their home if they have one
+    this.spawnAtHome();
+
+    this.connectToServer().catch(err => console.log('Server connection deferred:', err));
 
     // Expose debug functions on window for testing
     this.exposeDebugFunctions();
@@ -275,6 +488,10 @@ export class Game {
       const pos = this.player.getPosition();
       if (this.crafting.canCraft(type)) {
         this.crafting.craft(type);
+        const buildingId = `bld_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const building = { id: buildingId, type, lng: pos.lng, lat: pos.lat, ownerId: 'local', rotation: 0 };
+        this.buildingManager?.addBuilding(building);
+        this.saveBuildingToLocalStorage(building);
         this.network.placeBuilding(type, pos.lng, pos.lat);
         return `✅ Placed ${type} at ${pos.lng.toFixed(5)}, ${pos.lat.toFixed(5)}`;
       }
@@ -334,8 +551,8 @@ export class Game {
     this.playerSpriteNum = spriteNum;
     localStorage.setItem('gallax_player_sprite', spriteNum.toString());
 
-    // TODO: Send sprite change to server so other players see it
-    // this.network.changeSprite(spriteNum);
+    // Send sprite change to server so other players see it
+    this.network.changeSprite(spriteNum);
   }
 
   private start(): void {
@@ -379,11 +596,51 @@ export class Game {
       // Update NPCs
       this.npcManager?.update(deltaTime);
 
+      // Update mobs (with player position for aggro)
+      if (this.player && this.mobManager) {
+        const pos = this.player.getPosition();
+        this.mobManager.setPlayerPosition(pos.lng, pos.lat);
+        this.mobManager.update(deltaTime);
+      }
+
       // Update water entities (fish and boats)
       this.waterEntityManager?.update(deltaTime);
 
       // Update terrain entities (trains, etc.)
       this.terrainEntityManager?.update(deltaTime);
+    }
+
+    // Update combat system
+    if (this.combatSystem && this.combatSystem.getState() === 'IN_COMBAT') {
+      this.combatSystem.update(deltaTime / 60); // Convert frames to seconds (60fps)
+
+      // Keep mob health bar tracking the mob position during pan/zoom
+      const currentMob = this.combatSystem.getMob();
+      if (currentMob && this.combatUI && this.mobManager) {
+        const mobObj = this.mobManager.getMob(currentMob.id);
+        if (mobObj) {
+          const screenPos = this.mapManager.project({ lng: mobObj.lng, lat: mobObj.lat });
+          this.combatUI.updateMobPosition(screenPos.x, screenPos.y);
+        }
+      }
+    }
+
+    // Update proximity interaction prompts (NPC talk / mob fight)
+    this.updateProximityPrompts();
+
+    // Flush pixel canvas render (runs every frame, only actually renders when dirty)
+    this.pixelDrawingManager?.flushRender();
+
+    // Territory: flush render + update claim progress
+    this.territoryManager?.update();
+
+    // Broadcast home room position if inside a home (throttled)
+    if (this.homeInterior?.isInside()) {
+      const homeId = this.homeInterior.getCurrentHomeId();
+      if (homeId) {
+        const pos = this.homeInterior.getPlayerPosition();
+        this.network.homeMove(homeId, pos.x, pos.y);
+      }
     }
 
     // Follow train if enabled
@@ -437,27 +694,17 @@ export class Game {
     const coordsEl = document.getElementById('coords');
     const zoomEl = document.getElementById('zoom-level');
 
-    if (this.player && coordsEl) {
+    if (this.player) {
       const pos = this.player.getPosition();
-      coordsEl.textContent = `📍 ${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}`;
 
       // Check proximity to public spaces for missions
       if (this.publicSpacesManager) {
         const nearbySpace = this.publicSpacesManager.checkProximity(pos.lng, pos.lat);
 
-        // Debug logging
-        if (nearbySpace) {
-          console.log('Near public space:', nearbySpace.name);
-        }
-
         if ((window as any).setCurrentMissionSpace) {
           (window as any).setCurrentMissionSpace(nearbySpace);
         }
       }
-    }
-
-    if (zoomEl) {
-      zoomEl.textContent = `🔍 Zoom: ${this.mapManager.getZoom().toFixed(1)}`;
     }
   }
 
@@ -541,38 +788,74 @@ export class Game {
       }
 
       // If placing a building, handle building placement
-      if (this.isPlacingBuilding && this.crafting.getSelectedBuilding()) {
-        this.handleBuildingPlacement(clickLng, clickLat);
+      if (this.buildingActionState.isPlacingBuilding && this.crafting.getSelectedBuilding()) {
+        handleBuildingPlacement(this.buildingActionState, this.getBuildingDeps(), clickLng, clickLat);
         return;
       }
 
-      // Check if clicked on a building (for rotation)
+      // Check if clicked on a building
       const building = this.buildingManager?.getBuildingAtPosition(screenX, screenY);
-      if (building) {
-        this.selectBuildingForRotation(building.id);
+      if (building && this.player) {
+        const userId = authService.getUser()?.id || 'local';
+        const isOwner = building.ownerId === userId || this.isAdmin;
+
+        if (building.type === 'my_home') {
+          // Show action popup: Enter + Move (if owner or admin)
+          showBuildingActions(this.buildingActionState, this.getBuildingDeps(), building, screenX, screenY, isOwner);
+          return;
+        }
+
+        // For buildings owned by you (or admin), show gizmo
+        if (isOwner) {
+          selectBuildingForRotation(this.buildingActionState, this.getBuildingDeps(), building.id);
+          return;
+        }
+
+        // For buildings owned by others, just walk to them
+        this.player.setTarget({ lng: building.lng, lat: building.lat, type: 'terrain' }, () => {});
         return;
       }
 
       // Clicking elsewhere deselects any selected building
-      if (this.selectedBuildingId) {
-        this.deselectBuilding();
+      if (this.buildingActionState.selectedBuildingId) {
+        deselectBuilding(this.buildingActionState, this.getBuildingDeps());
       }
 
-      // Check if clicked on an NPC (highest priority for interaction)
-      const npc = this.npcManager?.findNPCAtPoint(screenX, screenY);
-      if (npc && this.player) {
-        // Set NPC as target (move to them like a resource)
-        this.player.setTarget({
-          lng: npc.lng,
-          lat: npc.lat,
-          type: 'npc',
-          npcId: npc.id
-        }, () => {
-          // When player reaches NPC, start dialogue
-          this.startNPCDialogue(npc);
-        });
-        return;
+      // Check if clicked on a train station — walk to it, then enter station mode
+      // (checked before NPC/mob so stations aren't blocked by overlapping sprites)
+      if (this.stationTeleporter) {
+        const map = this.mapManager.getMap();
+        let stationFeature: mapboxgl.GeoJSONFeature | null = null;
+        try {
+          const transitFeatures = map.queryRenderedFeatures([screenX, screenY], { layers: ['transit-label'] });
+          stationFeature = transitFeatures.find((f: any) => {
+            const maki = f.properties?.maki || '';
+            const type = f.properties?.type || '';
+            return maki.includes('rail') || type.includes('station');
+          }) as mapboxgl.GeoJSONFeature || null;
+        } catch { /* transit-label layer may not exist at all zoom levels */ }
+
+        if (stationFeature || this.stationTeleporter.isInStationMode()) {
+          const result = this.stationTeleporter.handleStationClick(stationFeature, clickLng, clickLat);
+          if (result.handled) {
+            if (result.walkTo && this.player) {
+              // Walk to the station first, then enter station mode on arrival
+              const station = result.walkTo;
+              notificationSystem.show(`🚉 Walking to ${station.name}...`, 'info', 2000);
+              this.player.setTarget(
+                { lng: station.lng, lat: station.lat, type: 'station' as any },
+                () => {
+                  this.stationTeleporter?.enterStationMode(station.name, station.lng, station.lat);
+                },
+              );
+            }
+            return;
+          }
+        }
       }
+
+      // NPCs and mobs are handled via proximity prompts (not click-to-target)
+      // They fall through to click-to-move below
 
       // Check if clicked on a resource
       const resource = this.findResourceAtPoint(screenX, screenY, clickLng, clickLat);
@@ -593,7 +876,7 @@ export class Game {
         // Click-to-move: check if destination is water
         if (this.isWater(clickLng, clickLat)) {
           console.log('🌊 Cannot move to water!');
-          this.showWaterBlockedFeedback(clickLng, clickLat);
+          showWaterBlockedFeedback(this.getBuildingDeps(), clickLng, clickLat);
           return;
         }
 
@@ -607,491 +890,6 @@ export class Game {
     });
   }
 
-  // Show feedback when trying to move to water
-  private showWaterBlockedFeedback(lng: number, lat: number): void {
-    const pos = this.mapManager.project({ lng, lat });
-    const feedbackEl = document.createElement('div');
-    feedbackEl.className = 'collect-feedback water-blocked';
-    feedbackEl.textContent = '🚫 🌊';
-    feedbackEl.style.left = `${pos.x}px`;
-    feedbackEl.style.top = `${pos.y}px`;
-    document.body.appendChild(feedbackEl);
-    setTimeout(() => {
-      feedbackEl.classList.add('fade-out');
-      setTimeout(() => feedbackEl.remove(), 500);
-    }, 100);
-  }
-
-  // Handle building placement
-  private handleBuildingPlacement(lng: number, lat: number): void {
-    const buildingType = this.crafting.getSelectedBuilding();
-    if (!buildingType) return;
-
-    // Check if location is water
-    if (this.isWater(lng, lat)) {
-      console.log('🌊 Cannot build on water!');
-      this.showWaterBlockedFeedback(lng, lat);
-      return;
-    }
-
-    // Check if player can afford
-    if (!this.crafting.canCraft(buildingType)) {
-      console.log('❌ Not enough resources!');
-      return;
-    }
-
-    // Consume resources and place building
-    if (this.crafting.craft(buildingType)) {
-      // Generate building ID
-      const buildingId = `bld_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-      // Broadcast to other players via geckos
-      this.network.placeBuilding(buildingType, lng, lat);
-      console.log(`🏗️ Placed ${BUILDING_DEFS[buildingType].emoji} ${BUILDING_DEFS[buildingType].name}!`);
-
-      // Award XP for placing building
-      const progression = (window as any).progression;
-      if (progression) {
-        const result = progression.addXP(25);
-        notificationSystem.showXP(25);
-        if (result.leveledUp) {
-          notificationSystem.showLevelUp(result.newLevel);
-        }
-        progression.incrementBuildingsPlaced();
-      }
-
-      // If logged in, persist to D1
-      if (authService.isAuthenticated()) {
-        buildingsAPI.create({ id: buildingId, type: buildingType, lng, lat, rotation: 0 })
-          .then(success => {
-            if (success) {
-              console.log(`💾 Building saved to database`);
-            } else {
-              console.warn(`⚠️ Failed to persist building to database`);
-            }
-          });
-      }
-
-      // Exit placement mode
-      this.isPlacingBuilding = false;
-      this.crafting.selectBuilding(null);
-      this.hidePlacementHint();
-      this.updateCraftingUI();
-      this.updateMapCursor();
-    }
-  }
-
-  // Select a building for rotation
-  private selectBuildingForRotation(buildingId: string): void {
-    // Deselect previous building if any
-    if (this.selectedBuildingId) {
-      this.deselectBuilding();
-    }
-
-    this.selectedBuildingId = buildingId;
-    console.log(`🔄 Selected building ${buildingId} for rotation`);
-
-    // Create rotation handle
-    this.createRotationHandle();
-
-    // Add map event listeners to keep gizmo in sync with map movement
-    this.addGizmoMapListeners();
-  }
-
-  // Add map event listeners to update gizmo position on zoom/pan/rotate
-  private addGizmoMapListeners(): void {
-    const map = this.mapManager.getMap();
-
-    // Create a bound handler that we can remove later
-    this.boundUpdateGizmoPosition = () => {
-      this.updateRotationHandlePosition();
-      this.updateMoveHandlePosition();
-    };
-
-    // Listen for map movements that require gizmo updates
-    map.on('zoom', this.boundUpdateGizmoPosition);
-    map.on('move', this.boundUpdateGizmoPosition);
-    map.on('rotate', this.boundUpdateGizmoPosition);
-  }
-
-  // Remove map event listeners for gizmo
-  private removeGizmoMapListeners(): void {
-    if (!this.boundUpdateGizmoPosition) return;
-
-    const map = this.mapManager.getMap();
-    map.off('zoom', this.boundUpdateGizmoPosition);
-    map.off('move', this.boundUpdateGizmoPosition);
-    map.off('rotate', this.boundUpdateGizmoPosition);
-
-    this.boundUpdateGizmoPosition = null;
-  }
-
-  // Deselect building and remove rotation handle
-  private deselectBuilding(): void {
-    this.removeGizmoMapListeners();
-    this.selectedBuildingId = null;
-    this.removeRotationHandle();
-  }
-
-  // Create the rotation handle UI (white circle above the building)
-  private createRotationHandle(): void {
-    this.removeRotationHandle();
-
-    if (!this.selectedBuildingId || !this.buildingManager) return;
-
-    const building = this.buildingManager.getBuildings().get(this.selectedBuildingId);
-    if (!building) return;
-
-    // Create blue glow around building
-    const glow = document.createElement('div');
-    glow.id = 'building-glow';
-    glow.style.cssText = `
-      position: fixed;
-      width: 60px;
-      height: 60px;
-      border-radius: 50%;
-      background: transparent;
-      border: 3px solid rgba(66, 165, 245, 0.8);
-      box-shadow: 0 0 15px rgba(66, 165, 245, 0.6), inset 0 0 10px rgba(66, 165, 245, 0.3);
-      z-index: 999;
-      transform: translate(-50%, -50%);
-      pointer-events: none;
-    `;
-    document.body.appendChild(glow);
-    this.buildingGlowEl = glow;
-
-    // Create line from center to rotation handle
-    const line = document.createElement('div');
-    line.id = 'rotation-line';
-    line.style.cssText = `
-      position: fixed;
-      height: 2px;
-      background: rgba(255, 255, 255, 0.8);
-      transform-origin: left center;
-      z-index: 999;
-      pointer-events: none;
-    `;
-    document.body.appendChild(line);
-    this.rotationLineEl = line;
-
-    // Create rotation handle element (white circle)
-    const handle = document.createElement('div');
-    handle.id = 'rotation-handle';
-    handle.style.cssText = `
-      position: fixed;
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      background: white;
-      border: 2px solid #333;
-      cursor: grab;
-      z-index: 1000;
-      transform: translate(-50%, -50%);
-      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-    `;
-    handle.textContent = '🔄';
-
-    document.body.appendChild(handle);
-    this.rotationHandleEl = handle;
-
-    // Position all elements
-    this.updateRotationHandlePosition();
-
-    // Add drag handlers
-    let isDragging = false;
-
-    const onStart = (clientX: number, clientY: number) => {
-      isDragging = true;
-      this.isRotating = true;
-      handle.style.cursor = 'grabbing';
-
-      // Calculate start angle from building center to handle
-      const building = this.buildingManager?.getBuildings().get(this.selectedBuildingId!);
-      if (building) {
-        const screenPos = this.mapManager.project({ lng: building.lng, lat: building.lat });
-        this.rotationStartAngle = Math.atan2(clientY - screenPos.y, clientX - screenPos.x);
-        this.buildingStartRotation = building.rotation;
-      }
-    };
-
-    const onMove = (clientX: number, clientY: number) => {
-      if (!isDragging || !this.selectedBuildingId) return;
-
-      const building = this.buildingManager?.getBuildings().get(this.selectedBuildingId);
-      if (!building) return;
-
-      // Calculate current angle from building center
-      const screenPos = this.mapManager.project({ lng: building.lng, lat: building.lat });
-      const currentAngle = Math.atan2(clientY - screenPos.y, clientX - screenPos.x);
-
-      // Calculate rotation delta
-      const angleDelta = currentAngle - this.rotationStartAngle;
-      const newRotation = this.buildingStartRotation + angleDelta;
-
-      // Apply rotation locally
-      this.buildingManager?.rotateBuilding(this.selectedBuildingId, newRotation);
-
-      // Update handle position
-      this.updateRotationHandlePosition();
-    };
-
-    const onEnd = () => {
-      if (!isDragging) return;
-      isDragging = false;
-      this.isRotating = false;
-      handle.style.cursor = 'grab';
-
-      // Send final rotation to server
-      if (this.selectedBuildingId) {
-        const building = this.buildingManager?.getBuildings().get(this.selectedBuildingId);
-        if (building) {
-          console.log(`🔄 Broadcasting rotation: ${building.rotation.toFixed(2)} rad`);
-          this.network.rotateBuilding(this.selectedBuildingId, building.rotation);
-
-          // If logged in, persist to D1
-          if (authService.isAuthenticated()) {
-            buildingsAPI.update(this.selectedBuildingId, { rotation: building.rotation })
-              .then(success => {
-                if (success) console.log(`💾 Rotation saved to database`);
-              });
-          }
-        }
-      }
-    };
-
-    // Mouse events
-    handle.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      onStart(e.clientX, e.clientY);
-    });
-    document.addEventListener('mousemove', (e) => onMove(e.clientX, e.clientY));
-    document.addEventListener('mouseup', onEnd);
-
-    // Touch events
-    handle.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      const touch = e.touches[0];
-      onStart(touch.clientX, touch.clientY);
-    });
-    document.addEventListener('touchmove', (e) => {
-      const touch = e.touches[0];
-      onMove(touch.clientX, touch.clientY);
-    });
-    document.addEventListener('touchend', onEnd);
-
-    // Create move handle (below the building)
-    this.createMoveHandle();
-  }
-
-  // Create the move handle UI (at center of building for dragging)
-  private createMoveHandle(): void {
-    this.removeMoveHandle();
-
-    if (!this.selectedBuildingId || !this.buildingManager) return;
-
-    const building = this.buildingManager.getBuildings().get(this.selectedBuildingId);
-    if (!building) return;
-
-    // Create move handle element (centered on building)
-    const moveHandle = document.createElement('div');
-    moveHandle.id = 'move-handle';
-    moveHandle.style.cssText = `
-      position: fixed;
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      background: rgba(66, 165, 245, 0.9);
-      border: 2px solid white;
-      cursor: move;
-      z-index: 1001;
-      transform: translate(-50%, -50%);
-      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-    `;
-    moveHandle.textContent = '✥';
-
-    document.body.appendChild(moveHandle);
-    this.moveHandleEl = moveHandle;
-
-    // Position the move handle
-    this.updateMoveHandlePosition();
-
-    // Add drag handlers for moving
-    let isDragging = false;
-
-    const onMoveStart = (clientX: number, clientY: number) => {
-      isDragging = true;
-      this.isMovingBuilding = true;
-      moveHandle.style.cursor = 'grabbing';
-
-      const building = this.buildingManager?.getBuildings().get(this.selectedBuildingId!);
-      if (building) {
-        this.moveStartScreenPos = { x: clientX, y: clientY };
-        this.buildingStartPos = { lng: building.lng, lat: building.lat };
-      }
-    };
-
-    const onMoveDrag = (clientX: number, clientY: number) => {
-      if (!isDragging || !this.selectedBuildingId || !this.moveStartScreenPos || !this.buildingStartPos) return;
-
-      // Calculate screen delta
-      const dx = clientX - this.moveStartScreenPos.x;
-      const dy = clientY - this.moveStartScreenPos.y;
-
-      // Convert screen delta to geo delta
-      const startScreen = this.mapManager.project({ lng: this.buildingStartPos.lng, lat: this.buildingStartPos.lat });
-      const newScreen = { x: startScreen.x + dx, y: startScreen.y + dy };
-      const newGeo = this.mapManager.unproject({ x: newScreen.x, y: newScreen.y });
-
-      // Apply position locally
-      this.buildingManager?.moveBuilding(this.selectedBuildingId, newGeo.lng, newGeo.lat);
-
-      // Update handles
-      this.updateRotationHandlePosition();
-      this.updateMoveHandlePosition();
-    };
-
-    const onMoveEnd = () => {
-      if (!isDragging) return;
-      isDragging = false;
-      this.isMovingBuilding = false;
-      moveHandle.style.cursor = 'move';
-
-      // Send final position to server
-      if (this.selectedBuildingId) {
-        const building = this.buildingManager?.getBuildings().get(this.selectedBuildingId);
-        if (building) {
-          console.log(`📍 Broadcasting move: ${building.lng.toFixed(5)}, ${building.lat.toFixed(5)}`);
-          this.network.moveBuilding(this.selectedBuildingId, building.lng, building.lat);
-
-          // If logged in, persist to D1
-          if (authService.isAuthenticated()) {
-            buildingsAPI.update(this.selectedBuildingId, { lng: building.lng, lat: building.lat })
-              .then(success => {
-                if (success) console.log(`💾 Position saved to database`);
-              });
-          }
-        }
-      }
-
-      this.moveStartScreenPos = null;
-      this.buildingStartPos = null;
-    };
-
-    // Mouse events
-    moveHandle.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      onMoveStart(e.clientX, e.clientY);
-    });
-    document.addEventListener('mousemove', (e) => onMoveDrag(e.clientX, e.clientY));
-    document.addEventListener('mouseup', onMoveEnd);
-
-    // Touch events
-    moveHandle.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      const touch = e.touches[0];
-      onMoveStart(touch.clientX, touch.clientY);
-    });
-    document.addEventListener('touchmove', (e) => {
-      const touch = e.touches[0];
-      onMoveDrag(touch.clientX, touch.clientY);
-    });
-    document.addEventListener('touchend', onMoveEnd);
-  }
-
-  // Update the position of the move handle (below the building)
-  private updateMoveHandlePosition(): void {
-    if (!this.moveHandleEl || !this.selectedBuildingId || !this.buildingManager) return;
-
-    const building = this.buildingManager.getBuildings().get(this.selectedBuildingId);
-    if (!building) return;
-
-    // Get building screen position - move handle is at center
-    const screenPos = this.mapManager.project({ lng: building.lng, lat: building.lat });
-
-    this.moveHandleEl.style.left = `${screenPos.x}px`;
-    this.moveHandleEl.style.top = `${screenPos.y}px`;
-  }
-
-  // Remove the move handle
-  private removeMoveHandle(): void {
-    if (this.moveHandleEl) {
-      this.moveHandleEl.remove();
-      this.moveHandleEl = null;
-    }
-  }
-
-  // Update the position of the rotation handle
-  private updateRotationHandlePosition(): void {
-    if (!this.rotationHandleEl || !this.selectedBuildingId || !this.buildingManager) return;
-
-    const building = this.buildingManager.getBuildings().get(this.selectedBuildingId);
-    if (!building) return;
-
-    // Get building screen position
-    const screenPos = this.mapManager.project({ lng: building.lng, lat: building.lat });
-
-    // Calculate handle position above the building (rotated)
-    const zoom = this.mapManager.getZoom();
-    const scale = Math.pow(2, zoom - 16) * 1.5;
-    const handleDistance = 50 * scale; // Distance from center to rotation handle
-
-    // Account for map bearing when positioning handles
-    const mapBearing = this.mapManager.getBearing() * (Math.PI / 180);
-
-    // Handle is above the building, rotated by building rotation minus map bearing
-    const handleAngle = building.rotation - mapBearing - Math.PI / 2; // Start at top
-    const handleX = screenPos.x + Math.cos(handleAngle) * handleDistance;
-    const handleY = screenPos.y + Math.sin(handleAngle) * handleDistance;
-
-    this.rotationHandleEl.style.left = `${handleX}px`;
-    this.rotationHandleEl.style.top = `${handleY}px`;
-
-    // Update glow position (centered on building)
-    if (this.buildingGlowEl) {
-      const glowSize = 60 * scale;
-      this.buildingGlowEl.style.width = `${glowSize}px`;
-      this.buildingGlowEl.style.height = `${glowSize}px`;
-      this.buildingGlowEl.style.left = `${screenPos.x}px`;
-      this.buildingGlowEl.style.top = `${screenPos.y}px`;
-    }
-
-    // Update line from center to rotation handle
-    if (this.rotationLineEl) {
-      const lineLength = Math.sqrt(
-        Math.pow(handleX - screenPos.x, 2) + Math.pow(handleY - screenPos.y, 2)
-      );
-      const lineAngle = Math.atan2(handleY - screenPos.y, handleX - screenPos.x) * (180 / Math.PI);
-      this.rotationLineEl.style.left = `${screenPos.x}px`;
-      this.rotationLineEl.style.top = `${screenPos.y}px`;
-      this.rotationLineEl.style.width = `${lineLength}px`;
-      this.rotationLineEl.style.transform = `rotate(${lineAngle}deg)`;
-    }
-  }
-
-  // Remove the rotation handle and related UI elements
-  private removeRotationHandle(): void {
-    if (this.rotationHandleEl) {
-      this.rotationHandleEl.remove();
-      this.rotationHandleEl = null;
-    }
-    if (this.rotationLineEl) {
-      this.rotationLineEl.remove();
-      this.rotationLineEl = null;
-    }
-    if (this.buildingGlowEl) {
-      this.buildingGlowEl.remove();
-      this.buildingGlowEl = null;
-    }
-    this.removeMoveHandle();
-  }
 
   // Find a collectible resource at the given world position
   private findResourceAtPoint(_screenX: number, _screenY: number, lng: number, lat: number): TargetResource | null {
@@ -1159,12 +957,15 @@ export class Game {
 
   // Collect a resource when player reaches it
   private collectResource(target: TargetResource): void {
+    const targetId = target.id || '';
+    const targetEmoji = target.emoji || '';
+
     // Skip if already collected (from server sync) - silently
-    if (this.collectedResourceIds.has(target.id)) {
+    if (targetId && this.collectedResourceIds.has(targetId)) {
       return;
     }
 
-    const resourceType = EMOJI_TO_RESOURCE[target.emoji];
+    const resourceType = targetEmoji ? EMOJI_TO_RESOURCE[targetEmoji] : undefined;
 
     if (resourceType) {
       this.inventory.add(resourceType);
@@ -1172,9 +973,24 @@ export class Game {
 
       // Award XP for collecting resource
       const progression = (window as any).progression;
+      let totalXP = 5;
+
+      // Check for emoji discovery bonus
+      if (targetEmoji) {
+        const discovery = this.emojiDiscovery.discover(targetEmoji);
+        if (discovery.isNew && discovery.entry) {
+          totalXP += discovery.xp;
+          notificationSystem.show(
+            `${targetEmoji} New discovery: ${discovery.entry.name}! ${discovery.entry.meaning} (+${discovery.xp} XP)`,
+            'levelup',
+            4000
+          );
+        }
+      }
+
       if (progression) {
-        const result = progression.addXP(5);
-        notificationSystem.showXP(5);
+        const result = progression.addXP(totalXP);
+        notificationSystem.showXP(totalXP);
         if (result.leveledUp) {
           notificationSystem.showLevelUp(result.newLevel);
         }
@@ -1182,15 +998,19 @@ export class Game {
       }
 
       // Show floating text feedback
-      this.showCollectFeedback(target.lng, target.lat, RESOURCE_INFO[resourceType].emoji);
+      showCollectFeedback(this.getBuildingDeps(), target.lng, target.lat, RESOURCE_INFO[resourceType].emoji);
     }
 
     // Notify server of collection
-    this.network.collectResource(target.id);
-    this.collectedResourceIds.add(target.id);
+    if (targetId) {
+      this.network.collectResource(targetId);
+      this.collectedResourceIds.add(targetId);
+    }
 
     // Remove the resource from its manager
-    this.removeResourceLocally(target.id, target.type);
+    if (targetId) {
+      this.removeResourceLocally(targetId, target.type);
+    }
   }
 
   // Remove a resource locally (from any manager)
@@ -1289,57 +1109,10 @@ export class Game {
     this.terrainEntityManager?.removeEntity(resourceId);
   }
 
-  // Show floating emoji feedback when collecting
-  private showCollectFeedback(lng: number, lat: number, emoji: string): void {
-    const pos = this.mapManager.project({ lng, lat });
-
-    // Create floating text
-    const feedbackEl = document.createElement('div');
-    feedbackEl.className = 'collect-feedback';
-    feedbackEl.textContent = `+1 ${emoji}`;
-    feedbackEl.style.left = `${pos.x}px`;
-    feedbackEl.style.top = `${pos.y}px`;
-
-    document.body.appendChild(feedbackEl);
-
-    // Animate and remove
-    setTimeout(() => {
-      feedbackEl.classList.add('fade-out');
-      setTimeout(() => feedbackEl.remove(), 500);
-    }, 100);
-  }
 
   // Create inventory hotbar UI
   private createInventoryUI(): void {
-    const hotbar = document.createElement('div');
-    hotbar.id = 'inventory-hotbar';
-    hotbar.innerHTML = `
-      <div class="hotbar-item" data-type="wood">
-        <span class="item-emoji">🪵</span>
-        <span class="item-count">0</span>
-      </div>
-      <div class="hotbar-item" data-type="stone">
-        <span class="item-emoji">🪨</span>
-        <span class="item-count">0</span>
-      </div>
-      <div class="hotbar-item" data-type="fish">
-        <span class="item-emoji">🐟</span>
-        <span class="item-count">0</span>
-      </div>
-      <div class="hotbar-item" data-type="gem">
-        <span class="item-emoji">💎</span>
-        <span class="item-count">0</span>
-      </div>
-      <div class="hotbar-item" data-type="shell">
-        <span class="item-emoji">🐚</span>
-        <span class="item-count">0</span>
-      </div>
-      <div class="hotbar-item" data-type="herb">
-        <span class="item-emoji">🌿</span>
-        <span class="item-count">0</span>
-      </div>
-    `;
-    document.body.appendChild(hotbar);
+    // Hotbar removed - resources shown in crafting menu instead
   }
 
   // Update inventory UI when items change
@@ -1362,67 +1135,93 @@ export class Game {
     }
   }
 
-  // Load buildings from D1 database (for persistence)
+  // Load buildings - try D1 first, fall back to localStorage
   private async loadBuildingsFromD1(): Promise<void> {
+    // Try loading from D1 (server) — server is authoritative
     try {
-      // Check version first - if cache is invalid, skip loading
-      const isValid = await this.validateBuildingsCache();
-      if (!isValid) {
-        console.log('🔄 Buildings cache invalidated by server, skipping D1 load');
-        return;
-      }
+      const response = await fetch('/api/buildings');
+      if (response.ok) {
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const buildings = await response.json();
+          if (Array.isArray(buildings)) {
+            console.log(`📂 Loaded ${buildings.length} buildings from D1`);
 
-      console.log('📂 Loading buildings from D1...');
-      const buildings = await buildingsAPI.getAll();
+            // Add server buildings to the map
+            const existingBuildings = this.buildingManager?.getBuildings();
+            for (const b of buildings) {
+              if (!existingBuildings?.has(b.id)) {
+                this.buildingManager?.addBuilding({
+                  id: b.id,
+                  type: b.type,
+                  lng: b.lng,
+                  lat: b.lat,
+                  rotation: b.rotation || 0,
+                  ownerId: b.owner_id,
+                  ownerName: b.owner_name || undefined,
+                });
+              }
+            }
 
-      if (buildings.length > 0) {
-        console.log(`📂 Loaded ${buildings.length} buildings from D1`);
-
-        // Add buildings that don't already exist
-        const existingBuildings = this.buildingManager?.getBuildings();
-        for (const b of buildings) {
-          if (!existingBuildings?.has(b.id)) {
-            this.buildingManager?.addBuilding({
-              id: b.id,
-              type: b.type,
-              lng: b.lng,
-              lat: b.lat,
-              rotation: b.rotation || 0,
-              ownerId: b.owner_id,
-              placedAt: new Date(b.created_at).getTime(),
-            });
+            // Sync localStorage to match server (prevents deleted buildings reappearing)
+            const serverData = buildings.map((b: any) => ({
+              id: b.id, type: b.type, lng: b.lng, lat: b.lat,
+              ownerId: b.owner_id, ownerName: b.owner_name, rotation: b.rotation || 0,
+            }));
+            localStorage.setItem('gallax_local_buildings', JSON.stringify(serverData));
+            console.log(`📂 Synced localStorage with ${serverData.length} server buildings`);
+            return; // Server loaded successfully, done
           }
         }
-      } else {
-        console.log('📂 No buildings in D1');
       }
     } catch (err) {
-      console.error('Failed to load buildings from D1:', err);
+      console.log('📂 D1 not available, will use local storage');
+    }
+
+    // Server not available — use localStorage as fallback
+    console.log('📂 Using localStorage buildings only');
+    this.loadBuildingsFromLocalStorage();
+  }
+
+  // Save a building to localStorage for offline/guest persistence
+  private saveBuildingToLocalStorage(building: { id: string; type: string; lng: number; lat: number; ownerId: string; ownerName?: string; rotation: number }): void {
+    try {
+      const key = 'gallax_local_buildings';
+      const existing = JSON.parse(localStorage.getItem(key) || '[]');
+      // Don't duplicate
+      if (!existing.some((b: any) => b.id === building.id)) {
+        existing.push(building);
+        localStorage.setItem(key, JSON.stringify(existing));
+      }
+    } catch (err) {
+      console.error('Failed to save building to localStorage:', err);
     }
   }
 
-  private async validateBuildingsCache(): Promise<boolean> {
+  // Load buildings from localStorage
+  private loadBuildingsFromLocalStorage(): void {
     try {
-      const response = await fetch('/api/game-version');
-      const { buildings_version } = await response.json();
+      const key = 'gallax_local_buildings';
+      const stored = JSON.parse(localStorage.getItem(key) || '[]');
+      if (!Array.isArray(stored) || stored.length === 0) return;
 
-      const cachedVersion = localStorage.getItem('gallax_buildings_version');
-
-      if (cachedVersion !== buildings_version) {
-        // Version mismatch - cache is invalid
-        console.log(`🔄 Version mismatch: cached=${cachedVersion}, server=${buildings_version}`);
-        localStorage.setItem('gallax_buildings_version', buildings_version);
-
-        // Clear all building-related caches
-        localStorage.removeItem('gallax_production_buildings');
-
-        return false;
+      console.log(`📂 Loading ${stored.length} buildings from localStorage`);
+      const existingBuildings = this.buildingManager?.getBuildings();
+      for (const b of stored) {
+        if (b.id && b.type && !existingBuildings?.has(b.id)) {
+          this.buildingManager?.addBuilding({
+            id: b.id,
+            type: b.type,
+            lng: b.lng,
+            lat: b.lat,
+            rotation: b.rotation || 0,
+            ownerId: b.ownerId || 'local',
+            ownerName: b.ownerName || undefined,
+          });
+        }
       }
-
-      return true;
     } catch (err) {
-      console.error('Failed to validate buildings cache:', err);
-      return true; // On error, allow loading to avoid breaking the game
+      console.error('Failed to load buildings from localStorage:', err);
     }
   }
 
@@ -1430,21 +1229,43 @@ export class Game {
   private async connectToServer(): Promise<void> {
     try {
       await this.network.connect({
-        onInit: (playerId, players, collectedResources, buildings) => {
+        onInit: (playerId, players, collectedResources, buildings, resumedPosition) => {
           console.log(`🎮 Received init as player ${playerId}`);
           console.log(`👥 ${players.length} players online:`, players.map(p => `${p.name}(${p.id})`));
           console.log(`🌲 ${collectedResources.length} resources already collected`);
           console.log(`🏠 ${buildings.length} buildings placed`);
 
+          // If resuming an existing session (same auth ID on another device),
+          // teleport to where we already were
+          if (resumedPosition && this.player) {
+            console.log(`🔄 Resuming session at ${resumedPosition.lng.toFixed(4)}, ${resumedPosition.lat.toFixed(4)}`);
+            this.player.setPosition(resumedPosition.lng, resumedPosition.lat);
+            this.player.cancelTarget();
+            this.mapManager.getMap().jumpTo({ center: [resumedPosition.lng, resumedPosition.lat] });
+          }
+
           // Track already collected resources
           collectedResources.forEach(id => this.collectedResourceIds.add(id));
 
-          // Get the server-assigned name for this player
-          const myPlayer = players.find(p => p.id === playerId);
-          if (myPlayer) {
-            this.playerName = myPlayer.name;
-            this.player?.setName(this.playerName);
-            console.log(`📛 Server assigned name: "${this.playerName}"`);
+          // Use auth name (consistent across sessions) instead of server-generated name
+          const user = authService.getUser();
+          const authName = user?.name || '';
+          if (authName) {
+            this.playerName = authName;
+            this.player?.setName(authName);
+            this.chatManager?.setPlayerName(authName);
+            // Tell server to use this name too
+            this.network.setName(authName);
+            console.log(`📛 Using auth name: "${authName}"`);
+          } else {
+            // Fallback to server-assigned name
+            const myPlayer = players.find(p => p.id === playerId);
+            if (myPlayer) {
+              this.playerName = myPlayer.name;
+              this.player?.setName(this.playerName);
+              this.chatManager?.setPlayerName(this.playerName);
+              console.log(`📛 Server assigned name: "${this.playerName}"`);
+            }
           }
 
           // Add other players
@@ -1455,8 +1276,10 @@ export class Game {
             this.otherPlayers?.addPlayer(p);
           });
 
-          // Add buildings
-          buildings.forEach(b => this.buildingManager?.addBuilding(b));
+          // Skip geckos buildings — D1 is the authoritative source
+          // Geckos server keeps buildings in RAM from all sessions,
+          // but D1 has the real state (including deletes)
+          console.log(`🏠 Skipping ${buildings.length} geckos buildings (D1 is authoritative)`);
         },
         onPlayerJoined: (player) => {
           console.log(`👋 Player ${player.name} joined with sprite=${player.spriteNum}`);
@@ -1465,6 +1288,8 @@ export class Game {
         onPlayerLeft: (playerId) => {
           console.log(`👋 Player ${playerId} left`);
           this.otherPlayers?.removePlayer(playerId);
+          // Also clean up home presence — player may have disconnected while inside a home
+          this.homeInterior?.removeOtherPlayer(playerId);
         },
         onPlayerMoved: (playerId, lng, lat) => {
           this.otherPlayers?.movePlayer(playerId, lng, lat);
@@ -1472,6 +1297,8 @@ export class Game {
         onPlayerNameChanged: (playerId, name) => {
           console.log(`📛 Player ${playerId} changed name to "${name}"`);
           this.otherPlayers?.updatePlayerName(playerId, name);
+          this.homeInterior?.updateOtherPlayerName(playerId, name);
+          this.buildingManager?.updateOwnerName(playerId, name);
         },
         onResourceCollected: (resourceId, playerId) => {
           console.log(`🌲 Resource ${resourceId} collected by ${playerId}`);
@@ -1479,6 +1306,12 @@ export class Game {
           this.removeResourceById(resourceId);
         },
         onBuildingPlaced: (building) => {
+          // Skip our own building echoes (we already added it locally)
+          const myId = this.network.getPlayerId();
+          if (building.ownerId === myId) {
+            console.log(`🏠 Skipping own building echo: ${building.type}`);
+            return;
+          }
           console.log(`🏠 Building ${building.type} placed by ${building.ownerId}`);
           this.buildingManager?.addBuilding(building);
         },
@@ -1486,20 +1319,95 @@ export class Game {
           console.log(`🔄 Building ${buildingId} rotated to ${rotation.toFixed(2)} rad`);
           this.buildingManager?.rotateBuilding(buildingId, rotation);
           // Update rotation handle if this is the selected building
-          if (buildingId === this.selectedBuildingId) {
-            this.updateRotationHandlePosition();
+          if (buildingId === this.buildingActionState.selectedBuildingId) {
+            updateRotationHandlePosition(this.buildingActionState, this.getBuildingDeps());
           }
         },
         onBuildingMoved: (buildingId, lng, lat) => {
           console.log(`📍 Building ${buildingId} moved to ${lng.toFixed(5)}, ${lat.toFixed(5)}`);
           this.buildingManager?.moveBuilding(buildingId, lng, lat);
-          // Update rotation handle if this is the selected building
-          if (buildingId === this.selectedBuildingId) {
-            this.updateRotationHandlePosition();
+          if (buildingId === this.buildingActionState.selectedBuildingId) {
+            updateRotationHandlePosition(this.buildingActionState, this.getBuildingDeps());
+          }
+        },
+        onBuildingDeleted: (buildingId) => {
+          console.log(`🗑️ Building ${buildingId} deleted by another player`);
+          this.buildingManager?.removeBuilding(buildingId);
+        },
+        onHomeStyleUpdated: (buildingId, emoji, tint) => {
+          const b = this.buildingManager?.getBuildings().get(buildingId);
+          if (b) {
+            if (emoji) b.text.text = emoji;
+            if (tint) b.text.tint = parseInt(tint.replace('#', ''), 16);
+            console.log(`🎨 Home ${buildingId} style updated: emoji=${emoji} tint=${tint}`);
+          }
+        },
+        // Combat sync
+        onMobKilled: (mobId, killedBy) => {
+          console.log(`⚔️ Mob ${mobId} killed by ${killedBy}`);
+          this.mobManager?.damageMob(mobId, 99999); // Remove mob for us too
+        },
+        onCombatStarted: (mobId, playerId) => {
+          console.log(`⚔️ Player ${playerId} started combat with mob ${mobId}`);
+          this.mobManager?.aggroMob(mobId); // Aggro the mob on our screen too
+        },
+        // Territory sync
+        onTerritoryClaimed: (playerId, playerName, cells, color) => {
+          this.territoryManager?.onTerritoryClaimed(playerId, playerName, cells, color);
+        },
+        // Sprite change
+        onSpriteChanged: (playerId, spriteNum) => {
+          console.log(`👤 Player ${playerId} changed sprite to ${spriteNum}`);
+          this.otherPlayers?.changeSprite(playerId, spriteNum);
+        },
+        // Furniture sync
+        onFurniturePlaced: (homeId, item) => {
+          if (this.homeInterior?.isInside() && this.homeInterior.getCurrentHomeId() === homeId) {
+            this.homeInterior.addFurnitureFromNetwork(item);
+          }
+        },
+        onFurnitureDeleted: (homeId, furnitureId) => {
+          if (this.homeInterior?.isInside() && this.homeInterior.getCurrentHomeId() === homeId) {
+            this.homeInterior.removeFurnitureFromNetwork(furnitureId);
+          }
+        },
+        onFurnitureMoved: (homeId, furnitureId, x, y, rotation, scale) => {
+          if (this.homeInterior?.isInside() && this.homeInterior.getCurrentHomeId() === homeId) {
+            this.homeInterior.moveFurnitureFromNetwork(furnitureId, x, y, rotation, scale);
+          }
+        },
+        // Home room presence
+        onPlayerEnteredHome: (playerId, homeId, spriteNum, playerName) => {
+          if (this.homeInterior?.isInside() && this.homeInterior.getCurrentHomeId() === homeId) {
+            // Skip our own entry
+            if (playerId !== this.network.getPlayerId()) {
+              this.homeInterior.addOtherPlayer(playerId, spriteNum, playerName);
+            }
+          }
+        },
+        onPlayerExitedHome: (playerId, homeId) => {
+          if (this.homeInterior?.isInside() && this.homeInterior.getCurrentHomeId() === homeId) {
+            this.homeInterior.removeOtherPlayer(playerId);
+          }
+        },
+        onPlayerHomeMoved: (playerId, homeId, x, y) => {
+          if (playerId === this.network.getPlayerId()) return; // Skip own movement
+          if (this.homeInterior?.isInside() && this.homeInterior.getCurrentHomeId() === homeId) {
+            this.homeInterior.moveOtherPlayer(playerId, x, y);
           }
         },
         onChatMessage: (message) => {
-          this.addChatMessage(message);
+          this.chatManager?.addMessage(message);
+        },
+        // Pixel drawing from other players
+        onPixelPlaced: (x, y, color, authorId, authorName) => {
+          this.pixelDrawingManager?.onPixelPlaced(x, y, color, authorId, authorName);
+        },
+        onPixelErased: (x, y) => {
+          this.pixelDrawingManager?.onPixelErased(x, y);
+        },
+        onPixelBatchPlaced: (pixels, authorId, authorName) => {
+          this.pixelDrawingManager?.onPixelBatchPlaced(pixels, authorId, authorName);
         },
         onPositionCorrection: (lng, lat, inputsToReapply) => {
           // Server position differs from our prediction - reconcile
@@ -1517,368 +1425,416 @@ export class Game {
         },
       });
 
-      // Send join message - server will assign a unique name
+      // Send join message with auth name so server uses it
       const pos = this.player?.getPosition();
       if (pos) {
-        console.log(`📤 Sending join message with sprite: ${this.playerSpriteNum}`);
-        this.network.join(pos.lng, pos.lat, this.playerSpriteNum);
+        const user = authService.getUser();
+        const authName = user?.name || '';
+        const authId = user?.id || '';
+        console.log(`📤 Sending join message with sprite: ${this.playerSpriteNum}, name: ${authName}, authId: ${authId}`);
+        this.network.join(pos.lng, pos.lat, this.playerSpriteNum, authName, authId);
       }
     } catch (error) {
       console.error('Failed to connect to server:', error);
+      // Use the name from auth service (guest or authenticated)
+      if (!this.playerName) {
+        const user = authService.getUser();
+        this.playerName = user?.name || 'Explorer';
+        this.player?.setName(this.playerName);
+        console.log(`📛 Using auth name: "${this.playerName}"`);
+      }
     }
   }
 
   // Create name input UI - empty input, type to change your server-assigned name
   private createNameInputUI(): void {
-    const nameContainer = document.createElement('div');
-    nameContainer.id = 'name-input-container';
-    nameContainer.innerHTML = `
-      <input type="text" id="player-name-input" placeholder="Change name..." maxlength="20" value="">
-      <button id="set-name-btn">Set</button>
-    `;
-    document.body.appendChild(nameContainer);
-
+    const modal = document.getElementById('name-modal');
     const input = document.getElementById('player-name-input') as HTMLInputElement;
-    const btn = document.getElementById('set-name-btn') as HTMLButtonElement;
+    const setBtn = document.getElementById('set-name-btn') as HTMLButtonElement;
+    const cancelBtn = document.getElementById('cancel-name-btn') as HTMLButtonElement;
+    const editBtn = document.getElementById('edit-name-btn') as HTMLButtonElement;
+    if (!modal || !input || !setBtn || !editBtn) return;
+
+    const openModal = () => {
+      input.value = '';
+      input.placeholder = this.playerName || 'Enter name...';
+      modal.style.display = 'flex';
+      setTimeout(() => input.focus(), 100);
+    };
+
+    const closeModal = () => {
+      modal.style.display = 'none';
+    };
 
     const setName = () => {
       const name = input.value.trim();
       if (name) {
-        console.log(`📛 Changing player name to "${name}"`);
         this.playerName = name;
         this.player?.setName(name);
         this.network.setName(name);
-        console.log(`📛 Name change sent to server`);
-        input.value = ''; // Clear input after setting
-        input.blur();
+        this.chatManager?.setPlayerName(name);
+        this.homeInterior?.updateLocalPlayerName(name);
+        // Update own building name tags (ownerId stored as authUserId or 'local')
+        const ownBuildingId = authService.getUser()?.id || 'local';
+        this.buildingManager?.updateOwnerName(ownBuildingId, name);
+        const userNameEl = document.getElementById('user-name');
+        if (userNameEl) userNameEl.textContent = name;
+        localStorage.setItem('gallax_guest_name', name);
+        closeModal();
       }
     };
 
-    btn.addEventListener('click', setName);
+    editBtn.addEventListener('click', openModal);
+    setBtn.addEventListener('click', setName);
+    cancelBtn?.addEventListener('click', closeModal);
     input.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') setName();
+      if (e.key === 'Enter') { e.preventDefault(); setName(); }
+    });
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal();
     });
   }
 
-  // Create chat UI
-  private createChatUI(): void {
-    const chatContainer = document.createElement('div');
-    chatContainer.id = 'chat-container';
-    chatContainer.innerHTML = `
-      <div id="chat-messages"></div>
-      <div id="chat-input-row">
-        <input type="text" id="chat-input" placeholder="Press Enter to chat..." maxlength="200">
-        <button id="chat-send-btn">Send</button>
-      </div>
-    `;
-    document.body.appendChild(chatContainer);
-
-    const input = document.getElementById('chat-input') as HTMLInputElement;
-    const btn = document.getElementById('chat-send-btn') as HTMLButtonElement;
-
-    const sendMessage = () => {
-      const message = input.value.trim();
-      if (message) {
-        this.network.sendChat(message);
-        input.value = '';
-      }
+  // Build the deps object for BuildingActions module functions
+  private getBuildingDeps(): BuildingDeps {
+    return {
+      mapManager: this.mapManager,
+      buildingManager: this.buildingManager,
+      inventory: this.inventory,
+      network: this.network,
+      crafting: this.crafting,
+      player: this.player,
+      playerName: this.playerName,
+      playerSpriteNum: this.playerSpriteNum,
+      homeInterior: this.homeInterior,
+      isWater: (lng: number, lat: number) => this.isWater(lng, lat),
+      saveBuildingToLocalStorage: (building) => this.saveBuildingToLocalStorage(building),
+      updateCraftingUI: () => this.craftingUI?.updateBuildingTab(),
+      updateMapCursor: () => this.craftingUI?.updateMapCursor(),
     };
-
-    btn.addEventListener('click', sendMessage);
-    input.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        sendMessage();
-      }
-    });
-
-    // Focus chat input when pressing Enter (if not already focused on desktop)
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && document.activeElement !== input && !this.isMobile()) {
-        e.preventDefault();
-        input.focus();
-      }
-    });
   }
 
   // Check if on mobile (touch device)
+  private spawnAtHome(): void {
+    const userId = authService.getUser()?.id || 'local';
+    const buildings = this.buildingManager?.getBuildings();
+    if (!buildings || !this.player) return;
+
+    for (const b of buildings.values()) {
+      if (b.type === 'my_home' && b.ownerId === userId) {
+        console.log(`🏡 Spawning at home: ${b.lng.toFixed(5)}, ${b.lat.toFixed(5)}`);
+        this.player.setPosition(b.lng, b.lat);
+        // Also center the map on the home
+        this.mapManager.getMap().setCenter([b.lng, b.lat]);
+        return;
+      }
+    }
+  }
+
   private isMobile(): boolean {
     return window.matchMedia('(pointer: coarse)').matches;
   }
 
-  // Create mobile UI buttons
-  private createMobileUI(): void {
-    if (!this.isMobile()) return;
 
-    const container = document.getElementById('mobile-ui-buttons');
-    if (!container) return;
+  // --- Proximity interaction prompts ---
 
-    // Hotbar toggle button
-    const btnHotbar = document.createElement('button');
-    btnHotbar.id = 'btn-hotbar';
-    btnHotbar.className = 'mobile-toggle-btn';
-    btnHotbar.innerHTML = '🎒';
-    btnHotbar.title = 'Toggle Inventory';
-    container.appendChild(btnHotbar);
+  private updateProximityPrompts(): void {
+    if (!this.player) { this.hideProximityPrompt(); return; }
+    // Don't show prompts while in combat, dialogue, home, or station mode
+    if (this.combatSystem?.getState() === 'IN_COMBAT') { this.hideProximityPrompt(); return; }
+    if (this.currentDialogueNPCId) { this.hideProximityPrompt(); return; }
+    if (this.homeInterior?.isInside()) { this.hideProximityPrompt(); return; }
+    if (this.stationTeleporter?.isInStationMode()) { this.hideProximityPrompt(); return; }
 
-    btnHotbar.addEventListener('click', () => {
-      const hotbar = document.getElementById('inventory-hotbar');
-      if (hotbar) {
-        hotbar.classList.toggle('visible');
-        btnHotbar.classList.toggle('active', hotbar.classList.contains('visible'));
-      }
-    });
+    const pos = this.player.getPosition();
+    const r = this.INTERACT_RADIUS;
 
-    // Crafting toggle button
-    const btnCrafting = document.createElement('button');
-    btnCrafting.id = 'btn-crafting';
-    btnCrafting.className = 'mobile-toggle-btn';
-    btnCrafting.innerHTML = '🔨';
-    btnCrafting.title = 'Toggle Crafting';
-    container.appendChild(btnCrafting);
-
-    btnCrafting.addEventListener('click', () => {
-      const craftMenu = document.getElementById('crafting-menu');
-      if (craftMenu) {
-        craftMenu.classList.toggle('visible');
-        btnCrafting.classList.toggle('active', craftMenu.classList.contains('visible'));
-      }
-    });
-
-    // Name change button (uses browser prompt)
-    const btnName = document.createElement('button');
-    btnName.id = 'btn-name';
-    btnName.className = 'mobile-toggle-btn';
-    btnName.innerHTML = '✏️';
-    btnName.title = 'Change Name';
-    container.appendChild(btnName);
-
-    btnName.addEventListener('click', () => {
-      const newName = prompt('Enter your name:', this.playerName || '');
-      if (newName && newName.trim()) {
-        const name = newName.trim().substring(0, 20);
-        console.log(`📛 Changing player name to "${name}"`);
-        this.playerName = name;
-        this.player?.setName(name);
-        this.network.setName(name);
-      }
-    });
-
-    // Fullscreen toggle button (top right)
-    const btnFullscreen = document.createElement('button');
-    btnFullscreen.id = 'btn-fullscreen';
-    btnFullscreen.className = 'mobile-toggle-btn';
-    btnFullscreen.innerHTML = '⛶';
-    btnFullscreen.title = 'Toggle Fullscreen';
-    container.appendChild(btnFullscreen);
-
-    btnFullscreen.addEventListener('click', () => {
-      if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(err => {
-          console.log('Fullscreen error:', err);
-        });
-      } else {
-        document.exitFullscreen();
-      }
-    });
-
-    // Chat toggle button (bottom right)
-    const btnChat = document.createElement('button');
-    btnChat.id = 'btn-chat';
-    btnChat.className = 'mobile-toggle-btn';
-    btnChat.innerHTML = '💬';
-    btnChat.title = 'Toggle Chat';
-    container.appendChild(btnChat);
-
-    const chatContainer = document.getElementById('chat-container');
-    const chatInput = document.getElementById('chat-input') as HTMLInputElement;
-
-    btnChat.addEventListener('click', () => {
-      if (chatContainer) {
-        chatContainer.classList.toggle('expanded');
-        btnChat.classList.toggle('active', chatContainer.classList.contains('expanded'));
-        // Focus input when opening chat
-        if (chatContainer.classList.contains('expanded') && chatInput) {
-          chatInput.focus();
+    // Find nearest mob in range
+    let nearestMob: Mob | null = null;
+    let nearestMobDist = Infinity;
+    if (this.mobManager && !this.combatSystem?.isInvulnerable()) {
+      for (const [, mob] of this.mobManager.getAllMobs()) {
+        const dx = mob.lng - pos.lng;
+        const dy = mob.lat - pos.lat;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < r && d < nearestMobDist) {
+          nearestMobDist = d;
+          nearestMob = mob;
         }
       }
-    });
-
-    // Update coords display without emojis on mobile
-    this.updateCoordsDisplay();
-  }
-
-  // Update coords/zoom display (no emojis on mobile)
-  private updateCoordsDisplay(): void {
-    const coordsEl = document.getElementById('coords');
-    const zoomEl = document.getElementById('zoom-level');
-    if (!coordsEl || !zoomEl) return;
-
-    const updateCoords = () => {
-      const pos = this.player?.getPosition();
-      const zoom = this.mapManager.getMap().getZoom();
-      if (pos) {
-        if (this.isMobile()) {
-          coordsEl.textContent = `${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}`;
-          zoomEl.textContent = `Zoom: ${zoom.toFixed(1)}`;
-        } else {
-          coordsEl.textContent = `📍 ${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}`;
-          zoomEl.textContent = `🔍 Zoom: ${zoom.toFixed(1)}`;
-        }
-      }
-    };
-
-    // Initial update
-    updateCoords();
-
-    // Update on map move
-    this.mapManager.getMap().on('move', updateCoords);
-  }
-
-  // Add a chat message to the UI
-  private addChatMessage(message: ChatMessage): void {
-    this.chatMessages.push(message);
-
-    // Trim old messages
-    while (this.chatMessages.length > this.maxChatMessages) {
-      this.chatMessages.shift();
     }
 
-    this.updateChatUI();
-  }
-
-  // Update chat messages display
-  private updateChatUI(): void {
-    const messagesContainer = document.getElementById('chat-messages');
-    if (!messagesContainer) return;
-
-    const myPlayerId = this.network.getPlayerId();
-
-    messagesContainer.innerHTML = this.chatMessages.map(msg => {
-      const isMe = msg.playerId === myPlayerId;
-      const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      return `<div class="chat-message ${isMe ? 'my-message' : ''}">
-        <span class="chat-time">${time}</span>
-        <span class="chat-name">${msg.playerName}:</span>
-        <span class="chat-text">${this.escapeHtml(msg.message)}</span>
-      </div>`;
-    }).join('');
-
-    // Scroll to bottom
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-  }
-
-  // Escape HTML to prevent XSS
-  private escapeHtml(text: string): string {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
-
-  // Create crafting UI
-  private createCraftingUI(): void {
-    const craftMenu = document.createElement('div');
-    craftMenu.id = 'crafting-menu';
-    craftMenu.innerHTML = `
-      <div class="crafting-header">🔨 Craft</div>
-      <div class="crafting-items"></div>
-    `;
-    document.body.appendChild(craftMenu);
-    this.updateCraftingUI();
-  }
-
-  // Update crafting UI
-  private updateCraftingUI(): void {
-    const container = document.querySelector('#crafting-menu .crafting-items');
-    if (!container) return;
-
-    const buildings = this.crafting.getAvailableBuildings();
-    container.innerHTML = buildings.map(({ type, def, canCraft }) => `
-      <button class="craft-btn ${canCraft ? 'can-craft' : 'cannot-craft'} ${this.crafting.getSelectedBuilding() === type ? 'selected' : ''}" data-type="${type}">
-        <span class="craft-emoji">${def.emoji}</span>
-        <span class="craft-name">${def.name}</span>
-        <span class="craft-cost">${Object.entries(def.cost).map(([r, a]) => `${a}${this.getResourceEmoji(r)}`).join(' ')}</span>
-      </button>
-    `).join('');
-
-    // Add click handlers
-    container.querySelectorAll('.craft-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const type = btn.getAttribute('data-type');
-        if (type && this.crafting.canCraft(type)) {
-          if (this.crafting.getSelectedBuilding() === type) {
-            // Deselect
-            this.crafting.selectBuilding(null);
-            this.isPlacingBuilding = false;
-            this.hidePlacementHint();
-          } else {
-            // Select for placement
-            this.crafting.selectBuilding(type);
-            this.isPlacingBuilding = true;
-            this.showPlacementHint(BUILDING_DEFS[type].emoji, BUILDING_DEFS[type].name);
-          }
-          this.updateCraftingUI();
-          this.updateMapCursor();
+    // Find nearest NPC in range
+    let nearestNPC: NPC | null = null;
+    let nearestNPCDist = Infinity;
+    if (this.npcManager) {
+      for (const [, npc] of this.npcManager.getAllNPCs()) {
+        if (npc.frozen) continue; // already in dialogue
+        const dx = npc.lng - pos.lng;
+        const dy = npc.lat - pos.lat;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < r && d < nearestNPCDist) {
+          nearestNPCDist = d;
+          nearestNPC = npc;
         }
-      });
-    });
+      }
+    }
+
+    // Priority: mob (combat) over NPC (talk) — show only one prompt at a time
+    if (nearestMob && nearestMob !== this.currentProximityMob) {
+      this.currentProximityMob = nearestMob;
+      this.currentProximityNPC = null;
+      this.showProximityPrompt(
+        `⚔️ Fight ${nearestMob.definition.emoji} ${nearestMob.definition.name}`,
+        () => this.startCombatWithMob(nearestMob!),
+      );
+    } else if (!nearestMob && nearestNPC && nearestNPC !== this.currentProximityNPC) {
+      this.currentProximityNPC = nearestNPC;
+      this.currentProximityMob = null;
+      this.showProximityPrompt(
+        `💬 Talk to ${nearestNPC.id.split('-').pop() || 'NPC'}`,
+        () => this.startNPCDialogue(nearestNPC!),
+      );
+    } else if (!nearestMob && !nearestNPC) {
+      this.currentProximityMob = null;
+      this.currentProximityNPC = null;
+      this.hideProximityPrompt();
+    }
   }
 
-  // Show placement hint
-  private showPlacementHint(emoji: string, name: string): void {
-    let hint = document.getElementById('placement-hint');
-    if (!hint) {
-      hint = document.createElement('div');
-      hint.id = 'placement-hint';
-      hint.style.cssText = `
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(0, 0, 0, 0.9);
-        color: white;
-        padding: 20px 30px;
-        border-radius: 12px;
-        font-size: 18px;
-        font-weight: bold;
-        z-index: 9999;
-        pointer-events: none;
-        animation: fadeIn 0.3s ease-out;
+  private showProximityPrompt(label: string, action: () => void): void {
+    if (!this.proximityPromptEl) {
+      this.proximityPromptEl = document.createElement('div');
+      this.proximityPromptEl.id = 'proximity-prompt';
+      this.proximityPromptEl.style.cssText = `
+        position:fixed; bottom:80px; left:50%; transform:translateX(-50%);
+        z-index:150; opacity:0; transition:opacity 0.2s ease;
       `;
-      document.body.appendChild(hint);
+      document.body.appendChild(this.proximityPromptEl);
     }
-    hint.innerHTML = `${emoji} Click on the map to place ${name}`;
+
+    const btn = document.createElement('button');
+    btn.style.cssText = `
+      padding:12px 24px; border-radius:14px; border:none;
+      background:rgba(20,20,30,0.85);
+      backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+      border:1px solid rgba(255,255,255,0.15);
+      color:white; font-size:16px; font-weight:600;
+      cursor:pointer; white-space:nowrap;
+      box-shadow:0 4px 16px rgba(0,0,0,0.3);
+    `;
+    btn.textContent = label;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      action();
+      this.hideProximityPrompt();
+    });
+
+    this.proximityPromptEl.innerHTML = '';
+    this.proximityPromptEl.appendChild(btn);
+    this.proximityPromptEl.style.opacity = '1';
   }
 
-  // Hide placement hint
-  private hidePlacementHint(): void {
-    const hint = document.getElementById('placement-hint');
-    if (hint) {
-      hint.remove();
+  private hideProximityPrompt(): void {
+    if (this.proximityPromptEl) {
+      this.proximityPromptEl.style.opacity = '0';
     }
+    this.currentProximityMob = null;
+    this.currentProximityNPC = null;
   }
 
-  // Update map cursor based on placement mode
-  private updateMapCursor(): void {
-    const map = this.mapManager.getMap();
-    const mapContainer = map.getContainer();
-    if (this.isPlacingBuilding) {
-      mapContainer.style.cursor = 'crosshair';
-    } else {
-      mapContainer.style.cursor = '';
-    }
-  }
 
-  // Helper to get emoji for resource type
-  private getResourceEmoji(resource: string): string {
-    const emojis: Record<string, string> = {
-      wood: '🪵', stone: '🪨', fish: '🐟', gem: '💎', shell: '🐚', herb: '🌿'
+  // --- Combat Integration ---
+
+  private startCombatWithMob(mob: Mob): void {
+    if (!this.combatSystem || !this.combatUI || !this.player) return;
+    if (this.combatSystem.getState() !== 'IDLE') return;
+
+    // Aggro the mob so it fights back
+    this.mobManager?.aggroMob(mob.id);
+
+    // Notify other players about combat
+    this.network.notifyCombatStarted(mob.id);
+
+    const combatMob: CombatMob = {
+      id: mob.id,
+      type: mob.definition.emoji,
+      name: mob.definition.name,
+      hp: mob.currentHp,
+      maxHp: mob.definition.hp,
+      damage: mob.definition.damage,
+      defense: mob.definition.defense,
+      speed: mob.definition.speed,
+      xpReward: mob.definition.xpReward,
     };
-    return emojis[resource] || '?';
+
+    const started = this.combatSystem.startCombat(combatMob);
+    if (!started) return;
+
+    this.player.isInCombat = true;
+    this.player.cancelTarget();
+
+    // Show combat UI
+    const pStats = this.combatSystem.getPlayerStats();
+    this.combatUI.show(
+      mob.definition.emoji,
+      mob.definition.name,
+      mob.currentHp,
+      mob.definition.hp,
+      pStats.currentHp,
+      pStats.maxHp
+    );
+    this.combatUI.showBanner(`⚔️ FIGHT! vs ${mob.definition.emoji} ${mob.definition.name}`, 'fight');
+
+    // Track mob position for UI
+    this.updateCombatMobPosition(mob);
+  }
+
+  private updateCombatMobPosition(mob: Mob): void {
+    if (!this.combatUI || !this.combatSystem) return;
+    if (this.combatSystem.getState() !== 'IN_COMBAT') return;
+
+    const screenPos = this.mapManager.project({ lng: mob.lng, lat: mob.lat });
+    this.combatUI.updateMobPosition(screenPos.x, screenPos.y);
+  }
+
+  private setupCombatCallbacks(): void {
+    if (!this.combatSystem || !this.combatUI) return;
+
+    this.combatSystem.setCallbacks({
+      onDamageDealt: (target, amount, isCrit) => {
+        if (!this.combatUI || !this.combatSystem) return;
+        const mob = this.combatSystem.getMob();
+
+        if (target === 'mob' && mob) {
+          // Damage dealt to mob
+          const mobObj = this.mobManager?.getMob(mob.id);
+          if (mobObj) {
+            const screenPos = this.mapManager.project({ lng: mobObj.lng, lat: mobObj.lat });
+            this.combatUI.showDamageNumber(screenPos.x, screenPos.y - 40, amount, 'mob', isCrit);
+            // Sync mob HP with MobManager
+            this.mobManager?.damageMob(mob.id, 0); // Just update health bar visual
+          }
+          this.combatUI.updateMobHp(mob.hp, mob.maxHp);
+        } else if (target === 'player') {
+          // Damage dealt to player
+          const pStats = this.combatSystem!.getPlayerStats();
+          if (this.player) {
+            this.player.currentHp = pStats.currentHp;
+            this.player.maxHp = pStats.maxHp;
+            const screenPos = this.mapManager.project(this.player.getPosition());
+            this.combatUI.showDamageNumber(screenPos.x, screenPos.y - 50, amount, 'player', isCrit);
+          }
+          this.combatUI.updatePlayerHp(pStats.currentHp, pStats.maxHp);
+        }
+      },
+
+      onCombatEnd: (result) => {
+        if (!this.combatSystem || !this.combatUI || !this.player) return;
+        const mob = this.combatSystem.getMob();
+
+        if (result === 'victory' && mob) {
+          // Award loot
+          const mobObj = this.mobManager?.getMob(mob.id);
+          if (mobObj) {
+            const loot = this.mobManager!.rollLoot(mobObj.definition);
+            for (const item of loot) {
+              const amount = Math.floor(Math.random() * (item.max - item.min + 1)) + item.min;
+              // Map loot emoji to resource type
+              const resourceType = EMOJI_TO_RESOURCE[item.emoji];
+              if (resourceType) {
+                this.inventory.add(resourceType, amount);
+              }
+            }
+            if (loot.length > 0) {
+              const lootStr = loot.map(l => `${l.emoji} ${l.name}`).join(', ');
+              notificationSystem.show(`🎒 Loot: ${lootStr}`, 'info');
+            }
+          }
+
+          // Award XP
+          const progression = (window as any).progression;
+          if (progression) {
+            const result2 = progression.addXP(mob.xpReward);
+            notificationSystem.showXP(mob.xpReward);
+            if (result2.leveledUp) {
+              notificationSystem.showLevelUp(result2.newLevel);
+              this.player.initCombatStats(result2.newLevel);
+            }
+          }
+
+          // Discover mob emoji
+          this.emojiDiscovery.discover(mob.type);
+
+          // Remove defeated mob and notify other players
+          this.mobManager?.damageMob(mob.id, 99999);
+          this.network.notifyMobKilled(mob.id);
+
+          // Track mobs killed
+          const kills = parseInt(localStorage.getItem('gallax_mobs_killed') || '0') + 1;
+          localStorage.setItem('gallax_mobs_killed', kills.toString());
+
+          this.combatUI.showBanner(`🏆 VICTORY! +${mob.xpReward} XP`, 'victory');
+        } else {
+          // Defeat - penalty applied by CombatSystem
+          this.player.respawn();
+          this.combatUI.showBanner('💀 DEFEAT...', 'defeat');
+          notificationSystem.show('💀 You were defeated! Lost some resources.', 'info');
+        }
+
+        this.player.isInCombat = false;
+
+        // Hide combat UI after a short delay
+        setTimeout(() => {
+          this.combatUI?.hide();
+        }, 1500);
+
+        this.craftingUI?.updateBuildingTab();
+      },
+
+      onAbilityUsed: (slot) => {
+        // Update UI cooldowns
+        if (!this.combatSystem || !this.combatUI) return;
+        const abilities = this.combatSystem.getAbilities();
+        const a = abilities[slot];
+        if (a) {
+          this.combatUI.updateAbilityCooldown(slot, a.currentCooldown * 1000, a.cooldown * 1000);
+        }
+      },
+    });
+
+    // Wire up UI ability buttons
+    this.combatUI.onAbilityClick((slot) => {
+      this.combatSystem?.useAbility(slot);
+    });
+
+    this.combatUI.onFleeClick(() => {
+      this.combatSystem?.flee();
+      this.player!.isInCombat = false;
+      setTimeout(() => this.combatUI?.hide(), 500);
+    });
+
+    // Mob interaction is handled by proximity prompts (not click-to-target)
+
+    // Auto-engage: when an aggroed mob reaches the player, start combat automatically
+    this.mobManager?.onMobReachPlayer((mob) => {
+      if (this.player && !this.player.isInCombat && !this.combatSystem?.isInvulnerable() && this.combatSystem?.getState() === 'IDLE') {
+        console.log(`⚔️ ${mob.definition.emoji} ${mob.definition.name} attacks you!`);
+        notificationSystem.show(`${mob.definition.emoji} ${mob.definition.name} attacks!`, 'info');
+        this.startCombatWithMob(mob);
+      }
+    });
+  }
+
+
+  /** Get territory system for external access */
+  getTerritorySystem(): TerritorySystem | null {
+    return this.territoryManager?.getSystem() ?? null;
   }
 
   stop(): void {
     this.isRunning = false;
+    this.territoryManager?.stop();
     this.network.disconnect();
   }
 }

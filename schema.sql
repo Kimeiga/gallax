@@ -81,12 +81,50 @@ CREATE TABLE IF NOT EXISTS player_missions (
 CREATE INDEX IF NOT EXISTS idx_player_missions_player ON player_missions(player_id);
 CREATE INDEX IF NOT EXISTS idx_player_missions_status ON player_missions(status);
 
+-- Pixel canvas (r/place style shared drawing)
+CREATE TABLE IF NOT EXISTS pixels (
+  x INTEGER NOT NULL,
+  y INTEGER NOT NULL,
+  color TEXT NOT NULL,
+  author_id TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (x, y)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pixels_author ON pixels(author_id);
+CREATE INDEX IF NOT EXISTS idx_pixels_area ON pixels(x, y);
+
 -- Game metadata for cache invalidation
 CREATE TABLE IF NOT EXISTS game_metadata (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Home furniture (persisted per home, visible to all players)
+CREATE TABLE IF NOT EXISTS home_furniture (
+  id TEXT NOT NULL,
+  home_id TEXT NOT NULL,
+  emoji TEXT NOT NULL,
+  x REAL NOT NULL,
+  y REAL NOT NULL,
+  placed_by TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id, home_id)
+);
+CREATE INDEX IF NOT EXISTS idx_home_furniture_home ON home_furniture(home_id);
+
+-- Territory cells (H3 hexagonal grid)
+CREATE TABLE IF NOT EXISTS territory (
+  h3_index TEXT NOT NULL PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  color TEXT NOT NULL DEFAULT '#4ECDC4',
+  claimed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  last_visited TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (owner_id) REFERENCES players(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_territory_owner ON territory(owner_id);
 
 -- Initialize buildings version
 INSERT OR IGNORE INTO game_metadata (key, value) VALUES ('buildings_version', '1');

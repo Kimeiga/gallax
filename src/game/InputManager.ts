@@ -7,6 +7,11 @@ export class InputManager {
 
   private setupKeyboard(): void {
     window.addEventListener('keydown', (e) => {
+      // Don't capture keys when typing in an input field
+      if (document.activeElement instanceof HTMLInputElement ||
+          document.activeElement instanceof HTMLTextAreaElement) {
+        return;
+      }
       this.keys.add(e.key.toLowerCase());
     });
 

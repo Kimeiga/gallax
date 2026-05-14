@@ -10,40 +10,66 @@ export interface BuildingDef {
 }
 
 export const BUILDING_DEFS: Record<string, BuildingDef> = {
-  house: {
-    emoji: '🏠',
-    name: 'House',
-    cost: {}, // Free for testing
-  },
-  farm: {
-    emoji: '🌾',
-    name: 'Farm',
-    cost: {}, // Free for testing
-  },
-  shop: {
-    emoji: '🏪',
-    name: 'Shop',
-    cost: {}, // Free for testing
-  },
-  dock: {
-    emoji: '⚓',
-    name: 'Dock',
-    cost: {}, // Free for testing
-  },
-  tower: {
-    emoji: '🗼',
-    name: 'Tower',
-    cost: {}, // Free for testing
-  },
+  // Free Home (one per player)
+  my_home: { emoji: '🏡', name: 'My Home', cost: {} },
+
+  // Starter Buildings
+  tent: { emoji: '⛺', name: 'Tent', cost: { wood: 2, herb: 1 } },
+  hut: { emoji: '🛖', name: 'Hut', cost: { wood: 3 } },
+  campfire: { emoji: '🔥', name: 'Campfire', cost: { wood: 3 } },
+  flag: { emoji: '🚩', name: 'Flag', cost: { herb: 1, wood: 1 } },
+
+  // Basic Buildings
+  house: { emoji: '🏠', name: 'House', cost: { wood: 5, stone: 3 } },
+  house_garden: { emoji: '🏡', name: 'Garden House', cost: { wood: 6, stone: 3, herb: 2 } },
+  farm: { emoji: '🌾', name: 'Farm', cost: { wood: 4, herb: 3 } },
+  shop: { emoji: '🏪', name: 'Shop', cost: { wood: 6, stone: 4 } },
+
+  // Water Buildings
+  dock: { emoji: '⚓', name: 'Dock', cost: { wood: 5, fish: 3, shell: 2 } },
+  lighthouse: { emoji: '🗼', name: 'Lighthouse', cost: { stone: 6, gem: 3 } },
+  sailboat: { emoji: '⛵', name: 'Sailboat', cost: { wood: 8, shell: 3 } },
+
+  // Civic Buildings
+  school: { emoji: '🏫', name: 'School', cost: { stone: 8, wood: 6, herb: 2 } },
+  hospital: { emoji: '🏥', name: 'Hospital', cost: { stone: 10, herb: 5, gem: 2 } },
+  bank: { emoji: '🏦', name: 'Bank', cost: { stone: 12, gem: 5 } },
+  factory: { emoji: '🏭', name: 'Factory', cost: { stone: 8, gem: 2 } },
+
+  // Cultural Buildings
+  shrine: { emoji: '⛩️', name: 'Shrine', cost: { stone: 8, wood: 8, gem: 4 } },
+  fountain: { emoji: '⛲', name: 'Fountain', cost: { stone: 6, shell: 4, gem: 2 } },
+  stadium: { emoji: '🏟️', name: 'Stadium', cost: { stone: 15, wood: 10 } },
+  ferris_wheel: { emoji: '🎡', name: 'Ferris Wheel', cost: { stone: 10, gem: 5, wood: 8 } },
+  circus: { emoji: '🎪', name: 'Circus Tent', cost: { wood: 8, herb: 4 } },
+
+  // Decorative
+  planted_tree: { emoji: '🌳', name: 'Planted Tree', cost: { herb: 2 } },
+  cherry_blossom: { emoji: '🌸', name: 'Cherry Blossom', cost: { herb: 3, gem: 1 } },
+  lantern: { emoji: '🏮', name: 'Lantern', cost: { wood: 1, gem: 1 } },
+  windchime: { emoji: '🎐', name: 'Wind Chime', cost: { shell: 2, gem: 1 } },
+  carp_streamer: { emoji: '🎏', name: 'Carp Streamer', cost: { fish: 2, herb: 2 } },
+
+  // Luxury Buildings
+  castle: { emoji: '🏰', name: 'Castle', cost: { stone: 20, wood: 15, gem: 8 } },
+  hotel: { emoji: '🏨', name: 'Hotel', cost: { stone: 15, wood: 10, gem: 5 } },
+  department_store: { emoji: '🏬', name: 'Department Store', cost: { stone: 12, wood: 8, gem: 4 } },
+
+  // Special/Rare
+  rocket: { emoji: '🚀', name: 'Rocket', cost: { gem: 15, stone: 10 } },
+  monument: { emoji: '🗽', name: 'Monument', cost: { stone: 25, gem: 10 } },
+  moai: { emoji: '🗿', name: 'Moai', cost: { stone: 20, gem: 8 } },
 };
 
 interface PlacedBuilding {
   id: string;
   type: string;
   text: Text;
+  nameTag?: Text;
   lng: number;
   lat: number;
   ownerId: string;
+  ownerName?: string;
   rotation: number; // Rotation in radians
 }
 
@@ -59,10 +85,17 @@ export class BuildingManager {
   }
 
   addBuilding(building: NetworkBuilding): void {
-    if (this.buildings.has(building.id)) return;
+    console.log(`🏗️ BuildingManager.addBuilding: id=${building.id} type=${building.type} at ${building.lng},${building.lat}`);
+    if (this.buildings.has(building.id)) {
+      console.log(`🏗️ Building ${building.id} already exists, skipping`);
+      return;
+    }
 
     const def = BUILDING_DEFS[building.type];
-    if (!def) return;
+    if (!def) {
+      console.error(`🏗️ Unknown building type: ${building.type}`);
+      return;
+    }
 
     const style = new TextStyle({
       fontSize: 32,
@@ -74,24 +107,72 @@ export class BuildingManager {
 
     this.app.stage.addChild(text);
 
+    // Add name tag for home buildings
+    let nameTag: Text | undefined;
+    if (building.type === 'my_home') {
+      const ownerName = building.ownerName || 'Someone';
+      const nameStyle = new TextStyle({
+        fontFamily: 'Arial',
+        fontSize: 12,
+        fontWeight: 'bold',
+        fill: 0xffffff,
+        stroke: { color: 0x000000, width: 3 },
+        align: 'center',
+      });
+      nameTag = new Text({ text: `${ownerName}'s Home`, style: nameStyle });
+      nameTag.anchor.set(0.5, 1);
+      this.app.stage.addChild(nameTag);
+    }
+
     const placed: PlacedBuilding = {
       id: building.id,
       type: building.type,
       text,
+      nameTag,
       lng: building.lng,
       lat: building.lat,
       ownerId: building.ownerId,
+      ownerName: building.ownerName,
       rotation: building.rotation || 0,
     };
 
     this.buildings.set(building.id, placed);
     this.updateBuildingPosition(placed);
+
+    // Restore saved emoji and tint for homes
+    if (building.type === 'my_home') {
+      const savedEmoji = localStorage.getItem(`gallax_home_emoji_${building.id}`);
+      if (savedEmoji) text.text = savedEmoji;
+      const savedTint = localStorage.getItem(`gallax_home_tint_${building.id}`);
+      if (savedTint) {
+        if (savedTint.startsWith('#')) {
+          text.tint = parseInt(savedTint.slice(1), 16);
+        } else {
+          // Legacy numeric index format
+          const hueToTint = [0xffffff, 0xff9999, 0xffff99, 0x99ff99, 0x99ffff, 0x9999ff];
+          text.tint = hueToTint[parseInt(savedTint)] || 0xffffff;
+        }
+      }
+    }
+
+    console.log(`🏗️ Building rendered! emoji=${def.emoji} total=${this.buildings.size}`);
+  }
+
+  // Update the name tag on all buildings owned by a player (e.g. after rename)
+  updateOwnerName(ownerId: string, newName: string): void {
+    for (const building of this.buildings.values()) {
+      if (building.ownerId === ownerId && building.nameTag) {
+        building.ownerName = newName;
+        building.nameTag.text = `${newName}'s Home`;
+      }
+    }
   }
 
   removeBuilding(buildingId: string): void {
     const building = this.buildings.get(buildingId);
     if (building) {
       building.text.destroy();
+      if (building.nameTag) building.nameTag.destroy();
       this.buildings.delete(buildingId);
     }
   }
@@ -142,9 +223,16 @@ export class BuildingManager {
     building.text.scale.set(scale);
 
     // Apply rotation, accounting for map bearing
-    // Map bearing is in degrees (clockwise from north), convert to radians
     const mapBearing = this.mapManager.getBearing() * (Math.PI / 180);
     building.text.rotation = building.rotation - mapBearing;
+
+    // Position name tag above building
+    if (building.nameTag) {
+      building.nameTag.x = Math.round(screenPos.x);
+      building.nameTag.y = Math.round(screenPos.y) - (18 * scale);
+      const nameScale = Math.max(0.5, Math.min(1.0, scale * 0.6));
+      building.nameTag.scale.set(nameScale);
+    }
   }
 
   updateAllPositions(): void {

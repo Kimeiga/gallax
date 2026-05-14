@@ -39,8 +39,10 @@ export interface NPC {
   sprite: Sprite;
   lng: number;
   lat: number;
-  vx: number; // velocity in lng
-  vy: number; // velocity in lat
+  vx: number; // current velocity in lng
+  vy: number; // current velocity in lat
+  tvx: number; // target velocity in lng (smooth transition)
+  tvy: number; // target velocity in lat
   seed: number;
   nextDirectionChange: number; // timestamp
   frozen: boolean; // Whether this NPC is frozen (in dialogue)
@@ -59,7 +61,7 @@ export class NPCManager {
   private readonly baseZoom = 16;
   private readonly baseScale = 0.75; // Same size as player
   private readonly moveSpeed = 0.000008; // Slower than player
-  private readonly NPCS_PER_AREA = 3;
+  private readonly NPCS_PER_AREA = 2; // Slightly reduced density
   private readonly DIRECTION_CHANGE_INTERVAL = 3000; // ms
 
   constructor(mapManager: MapManager, app: Application) {
@@ -179,6 +181,8 @@ export class NPCManager {
       lat,
       vx: Math.cos(angle) * this.moveSpeed,
       vy: Math.sin(angle) * this.moveSpeed,
+      tvx: Math.cos(angle) * this.moveSpeed,
+      tvy: Math.sin(angle) * this.moveSpeed,
       seed: hashString(id),
       nextDirectionChange: Date.now() + rng.range(1000, this.DIRECTION_CHANGE_INTERVAL),
       frozen: false
@@ -221,6 +225,16 @@ export class NPCManager {
         this.changeDirection(npc, now);
       }
 
+      // Smoothly lerp velocity toward target (no instant direction changes)
+      const lerpFactor = 0.05;
+      npc.vx += (npc.tvx - npc.vx) * lerpFactor;
+      npc.vy += (npc.tvy - npc.vy) * lerpFactor;
+
+      // Flip sprite based on current velocity
+      if (Math.abs(npc.vx) > 0.0000001) {
+        npc.sprite.scale.x = npc.vx < 0 ? -Math.abs(npc.sprite.scale.x) : Math.abs(npc.sprite.scale.x);
+      }
+
       // Calculate new position
       const newLng = npc.lng + npc.vx * deltaTime;
       const newLat = npc.lat + npc.vy * deltaTime;
@@ -230,8 +244,9 @@ export class NPCManager {
         npc.lng = newLng;
         npc.lat = newLat;
       } else {
-        // Hit obstacle, change direction
-        this.changeDirection(npc, now);
+        // Hit obstacle, reverse target direction
+        npc.tvx = -npc.tvx;
+        npc.tvy = -npc.tvy;
       }
 
       this.updateNPCPosition(npc);
@@ -241,12 +256,10 @@ export class NPCManager {
   private changeDirection(npc: NPC, now: number): void {
     const rng = new SeededRandom(npc.seed + Math.floor(now / 1000));
     const angle = rng.range(0, Math.PI * 2);
-    npc.vx = Math.cos(angle) * this.moveSpeed;
-    npc.vy = Math.sin(angle) * this.moveSpeed;
+    // Set target velocity (actual velocity lerps toward this)
+    npc.tvx = Math.cos(angle) * this.moveSpeed;
+    npc.tvy = Math.sin(angle) * this.moveSpeed;
     npc.nextDirectionChange = now + rng.range(2000, this.DIRECTION_CHANGE_INTERVAL);
-
-    // Flip sprite based on direction
-    npc.sprite.scale.x = npc.vx < 0 ? -Math.abs(npc.sprite.scale.x) : Math.abs(npc.sprite.scale.x);
   }
 
   updateAllPositions(): void {

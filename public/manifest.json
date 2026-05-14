@@ -1,0 +1,16 @@
+{
+  "name": "Gallax",
+  "short_name": "Gallax",
+  "description": "Multiplayer emoji map game - explore NYC, build, fight, and draw pixel art",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f0f1a",
+  "theme_color": "#3b82f6",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

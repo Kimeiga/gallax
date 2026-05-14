@@ -18,12 +18,14 @@ export class NotificationSystem {
     this.container.id = 'notification-container';
     this.container.style.cssText = `
       position: fixed;
-      top: 80px;
-      right: 20px;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
       z-index: 10000;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      align-items: center;
+      gap: 6px;
       pointer-events: none;
     `;
     document.body.appendChild(this.container);
@@ -36,23 +38,20 @@ export class NotificationSystem {
     const notif = document.createElement('div');
     notif.className = `notification notification-${type}`;
     
-    const emoji = this.getEmoji(type);
-    notif.innerHTML = `<span class="notif-emoji">${emoji}</span><span class="notif-text">${message}</span>`;
-    
+    notif.innerHTML = `<span class="notif-text">${message}</span>`;
+
     notif.style.cssText = `
-      background: ${this.getBackground(type)};
+      background: rgba(30, 30, 40, 0.7);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.08);
       color: white;
-      padding: 12px 20px;
+      padding: 6px 12px;
       border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-      font-size: 14px;
-      font-weight: 500;
-      display: flex;
-      align-items: center;
-      gap: 10px;
+      font-size: 12px;
       animation: slideIn 0.3s ease-out;
       pointer-events: auto;
-      max-width: 300px;
+      max-width: 250px;
     `;
 
     this.container?.appendChild(notif);
@@ -94,8 +93,50 @@ export class NotificationSystem {
     return colors[type] || '#3b82f6';
   }
 
+  private activeXP: { el: HTMLElement; total: number; timer: number } | null = null;
+
   showXP(amount: number): void {
-    this.show(`+${amount} XP`, 'xp', 2000);
+    // Collapse: if there's already an XP notification, add to it
+    if (this.activeXP && this.activeXP.el.parentElement) {
+      this.activeXP.total += amount;
+      const text = this.activeXP.el.querySelector('.notif-text');
+      if (text) text.textContent = `+${this.activeXP.total} XP`;
+      // Bump animation
+      this.activeXP.el.style.transform = 'scale(1.05)';
+      setTimeout(() => { if (this.activeXP) this.activeXP.el.style.transform = ''; }, 100);
+      // Reset dismiss timer
+      clearTimeout(this.activeXP.timer);
+      this.activeXP.timer = window.setTimeout(() => {
+        if (this.activeXP) {
+          this.activeXP.el.style.animation = 'slideOut 0.3s ease-out';
+          setTimeout(() => { this.activeXP?.el.remove(); this.activeXP = null; }, 300);
+        }
+      }, 2000);
+      return;
+    }
+
+    // Create new XP notification
+    if (!this.container) this.init();
+    const notif = document.createElement('div');
+    notif.className = 'notification notification-xp';
+    notif.innerHTML = `<span class="notif-text">+${amount} XP</span>`;
+    notif.style.cssText = `
+      background: rgba(30, 30, 40, 0.7);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: #fbbf24; padding: 6px 12px; border-radius: 8px;
+      font-size: 12px;
+      animation: slideIn 0.3s ease-out; pointer-events: auto; max-width: 250px;
+      transition: transform 0.1s;
+    `;
+    this.container?.appendChild(notif);
+
+    const timer = window.setTimeout(() => {
+      notif.style.animation = 'slideOut 0.3s ease-out';
+      setTimeout(() => { notif.remove(); this.activeXP = null; }, 300);
+    }, 2000);
+
+    this.activeXP = { el: notif, total: amount, timer };
   }
 
   showLevelUp(level: number): void {
