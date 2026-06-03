@@ -2,9 +2,10 @@
 
 interface ImportMetaEnv {
   readonly VITE_MAPBOX_TOKEN: string;
+  readonly VITE_GOOGLE_MAPS_API_KEY?: string;
+  readonly VITE_CESIUM_ION_TOKEN?: string;
 }
 
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
-

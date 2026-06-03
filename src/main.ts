@@ -316,6 +316,18 @@ function setupMissionUI() {
 }
 
 async function main() {
+  if (window.location.pathname === '/cesium-3d') {
+    const { initCesium3D } = await import('./cesium3d');
+    await initCesium3D();
+    return;
+  }
+
+  if (window.location.pathname === '/photoreal-3d') {
+    const { initPhotoreal3D } = await import('./photoreal3d');
+    await initPhotoreal3D();
+    return;
+  }
+
   if (!MAPBOX_TOKEN) {
     console.error('Missing VITE_MAPBOX_TOKEN environment variable');
     document.body.innerHTML = '<h1>Missing Mapbox token. Please set VITE_MAPBOX_TOKEN in .env</h1>';
