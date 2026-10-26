@@ -14,9 +14,10 @@
     "dev:all": "concurrently \"npm run server\" \"npm run dev\"",
     "cf:types": "wrangler types",
     "cf:dev": "npm run build && wrangler dev",
-    "cf:deploy": "npm run build && wrangler deploy",
+    "cf:deploy": "npm run build:production && wrangler pages deploy dist --project-name gallax",
     "cf:tail": "wrangler tail",
-    "test:multiplayer": "node tools/test-twinwire.mjs"
+    "test:multiplayer": "node tools/test-twinwire.mjs",
+    "build:production": "node tools/build-production.mjs"
   },
   "dependencies": {
     "@geckos.io/snapshot-interpolation": "^1.1.1",
