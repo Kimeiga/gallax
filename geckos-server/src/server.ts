@@ -1,6 +1,7 @@
-import geckos, { GeckosServer, ServerChannel, Data } from '@geckos.io/server';
+import { createEventServer, createNativeRtcFactory, type ServerEventChannel as ServerChannel } from 'twinwire/server';
+import type { Json as Data } from 'twinwire';
+import CONTRACT from './contract.json' with {type:'json'};
 import { SnapshotInterpolation } from '@geckos.io/snapshot-interpolation';
-import http from 'http';
 
 // Types
 interface Player {
@@ -39,63 +40,17 @@ const isProduction = process.env.NODE_ENV === 'production';
 // Snapshot interpolation
 const SI = new SnapshotInterpolation(SNAPSHOT_RATE);
 
-// Create HTTP server
-const server = http.createServer((req, res) => {
-  // Log all WebRTC-related requests for debugging
-  if (req.url?.includes('.wrtc')) {
-    console.log(`📡 WebRTC request: ${req.method} ${req.url}`);
-  }
-
-  // Health check endpoint
-  if (req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', players: players.size }));
-    return;
-  }
-  res.writeHead(200);
-  res.end('Gallax Game Server');
-});
-
-// Open Relay TURN servers (free) for when UDP is blocked
-const openRelayIceServers = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun.relay.metered.ca:80' },
-  {
-    urls: 'turn:openrelay.metered.ca:80',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
+const io = await createEventServer({
+  namespace: CONTRACT.namespace, latest: CONTRACT.latest,
+  port: Number(process.env.PORT ?? 3000), host: '0.0.0.0',
+  origins: origin => /^https?:\/\//.test(origin), resumeGraceMs: 90_000,
+  rtc: process.env.RTC === '0' ? undefined : await createNativeRtcFactory({port:Number(process.env.RTC_PORT??10000)}),
+  http: (request,response) => {
+    if(request.url === '/health'){
+      response.writeHead(200,{'content-type':'application/json'});
+      response.end(JSON.stringify({status:'ok',players:players.size,twinwire:'2.2.0',wire:4,sessions:io.game.sessions.size}));
+    }else {response.writeHead(404);response.end('Gallax game server');}
   },
-  {
-    urls: 'turn:openrelay.metered.ca:80?transport=tcp',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-  {
-    urls: 'turns:openrelay.metered.ca:443?transport=tcp',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-];
-
-// Create geckos.io server with TURN servers for reliable connectivity
-const io: GeckosServer = geckos({
-  iceServers: openRelayIceServers,
-  cors: {
-    origin: '*',
-    allowAuthorization: true
-  },
-  bindAddress: '0.0.0.0',
-  portRange: {
-    min: 10000,
-    max: 20000
-  },
-  // ordered: true improves iOS Safari WebRTC data channel compatibility
-  ordered: true,
 });
 
 /**
@@ -104,13 +59,13 @@ const io: GeckosServer = geckos({
  */
 function safeEmit(emitter: any, event: string, data: any, opts?: any): void {
   try {
-    emitter.emit(event, data, opts);
+    emitter.emit(event, data);
   } catch (err: any) {
     console.warn(`⚠️ Emit "${event}" failed: ${err.message || err}`);
   }
 }
 
-io.addServer(server);
+
 
 console.log(`🔧 Environment: ${isProduction ? 'production' : 'development'}`);
 
@@ -203,10 +158,18 @@ io.onConnection((channel: ServerChannel) => {
   channels.set(playerId, channel);
   console.log(`👤 Player ${playerId} connected (${channels.size} total)`);
 
+  channel.onResume = () => {
+    const player = players.get(playerId);
+    if(!player)return;
+    safeEmit(channel,'init',{playerId,players:Array.from(players.values()),collectedResources:Array.from(collectedResources.keys()),buildings:Array.from(buildings.values()),resumedPosition:{lng:player.lng,lat:player.lat}});
+  };
+
   // Handle join - use client name if provided, otherwise generate one
   channel.on('join', (data: Data) => {
     const msg = data as { spriteNum?: number; lng: number; lat: number; name?: string; authId?: string };
 
+    if(!Number.isFinite(msg?.lng)||!Number.isFinite(msg?.lat)||Math.abs(msg.lng)>180||Math.abs(msg.lat)>90)return;
+    if(players.has(playerId)){channel.onResume();return;}
     const authId = msg.authId || '';
     let resumedPosition: { lng: number; lat: number } | undefined;
 
@@ -275,7 +238,7 @@ io.onConnection((channel: ServerChannel) => {
   channel.on('move', (data: Data) => {
     const msg = data as { lng: number; lat: number; seq?: number };
     const player = players.get(playerId);
-    if (player) {
+    if (player && Number.isFinite(msg?.lng) && Number.isFinite(msg?.lat) && Math.abs(msg.lng)<=180 && Math.abs(msg.lat)<=90) {
       player.lng = msg.lng;
       player.lat = msg.lat;
 
@@ -529,8 +492,5 @@ io.onConnection((channel: ServerChannel) => {
   });
 });
 
-const PORT = parseInt(process.env.PORT || '3000', 10);
-server.listen(PORT, () => {
-  console.log(`🎮 Gallax geckos.io server running on port ${PORT}`);
-});
-
+const PORT=await io.listen();
+console.log('Gallax Twinwire server on :'+PORT);

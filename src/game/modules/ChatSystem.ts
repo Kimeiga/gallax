@@ -1,4 +1,4 @@
-import { GeckosNetworkManager as NetworkManager, ChatMessage } from '../../network/GeckosNetworkManager';
+import { TwinwireNetworkManager as NetworkManager, ChatMessage } from '../../network/TwinwireNetworkManager';
 
 export class ChatManager {
   private chatOpen = false;

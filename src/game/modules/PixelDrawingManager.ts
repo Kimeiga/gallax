@@ -1,5 +1,5 @@
 import { MapManager } from '../../map/MapManager';
-import { GeckosNetworkManager } from '../../network/GeckosNetworkManager';
+import { TwinwireNetworkManager } from '../../network/TwinwireNetworkManager';
 import { PixelCanvas } from '../PixelCanvas';
 import { PixelDrawUI } from '../PixelDrawUI';
 import { authService } from '../../auth/AuthService';
@@ -26,7 +26,7 @@ export class PixelDrawingManager {
   constructor(
     private readonly pixelCanvas: PixelCanvas,
     private readonly pixelDrawUI: PixelDrawUI,
-    private readonly network: GeckosNetworkManager,
+    private readonly network: TwinwireNetworkManager,
     private readonly mapManager: MapManager,
   ) {}
 

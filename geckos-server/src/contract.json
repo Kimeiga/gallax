@@ -1,0 +1,8 @@
+{
+  "namespace": "gallax-v1",
+  "latest": {
+    "move": 1,
+    "snapshot": 2,
+    "position_ack": 3
+  }
+}

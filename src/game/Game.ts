@@ -7,7 +7,7 @@ import { NPCManager, NPC } from './NPCManager';
 import { WaterEntityManager } from './WaterEntityManager';
 import { TerrainEntityManager } from './TerrainEntityManager';
 import { Inventory, EMOJI_TO_RESOURCE, RESOURCE_INFO } from './Inventory';
-import { GeckosNetworkManager as NetworkManager, ChatMessage } from '../network/GeckosNetworkManager';
+import { TwinwireNetworkManager as NetworkManager, ChatMessage } from '../network/TwinwireNetworkManager';
 import { OtherPlayersManager } from './OtherPlayersManager';
 import { BuildingManager, BUILDING_DEFS } from './BuildingManager';
 import { CraftingSystem } from './Crafting';
