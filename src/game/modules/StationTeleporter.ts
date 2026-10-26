@@ -1,7 +1,7 @@
 import mapboxgl from 'mapbox-gl';
 import { MapManager } from '../../map/MapManager';
 import { Player } from '../Player';
-import { GeckosNetworkManager } from '../../network/GeckosNetworkManager';
+import { TwinwireNetworkManager } from '../../network/TwinwireNetworkManager';
 import { notificationSystem } from '../NotificationSystem';
 import {
   findNearestMajorStation,
@@ -24,7 +24,7 @@ export interface StationTarget {
 export class StationTeleporter {
   private mapManager: MapManager;
   private getPlayer: () => Player | null;
-  private network: GeckosNetworkManager;
+  private network: TwinwireNetworkManager;
   private sendPositionUpdate: () => void;
 
   private inStationMode = false;
@@ -35,7 +35,7 @@ export class StationTeleporter {
   constructor(
     mapManager: MapManager,
     getPlayer: () => Player | null,
-    network: GeckosNetworkManager,
+    network: TwinwireNetworkManager,
     sendPositionUpdate: () => void,
   ) {
     this.mapManager = mapManager;

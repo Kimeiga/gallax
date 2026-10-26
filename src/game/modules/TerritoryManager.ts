@@ -1,6 +1,6 @@
 import type { GeoJSONFeature } from 'mapbox-gl';
 import { MapManager } from '../../map/MapManager';
-import { GeckosNetworkManager } from '../../network/GeckosNetworkManager';
+import { TwinwireNetworkManager } from '../../network/TwinwireNetworkManager';
 import { Inventory, ResourceType } from '../Inventory';
 import { InputManager } from '../InputManager';
 import { Player } from '../Player';
@@ -76,7 +76,7 @@ export class TerritoryManager {
 
   constructor(
     private readonly mapManager: MapManager,
-    private readonly network: GeckosNetworkManager,
+    private readonly network: TwinwireNetworkManager,
     private readonly inventory: Inventory,
     private readonly inputManager: InputManager,
     private readonly getPlayer: () => Player | null,

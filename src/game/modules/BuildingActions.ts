@@ -1,7 +1,7 @@
 import { MapManager } from '../../map/MapManager';
 import { BuildingManager, BUILDING_DEFS } from '../BuildingManager';
 import { Inventory } from '../Inventory';
-import { GeckosNetworkManager as NetworkManager } from '../../network/GeckosNetworkManager';
+import { TwinwireNetworkManager as NetworkManager } from '../../network/TwinwireNetworkManager';
 import { CraftingSystem } from '../Crafting';
 import { authService } from '../../auth/AuthService';
 import { buildingsAPI } from '../../api/BuildingsAPI';

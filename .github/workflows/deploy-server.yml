@@ -1,43 +1,19 @@
-name: Deploy Geckos Server
-
+name: Verify Gallax server artifact
+# Client and server must be activated as one reviewed release.
+# The former push job copied only server.js, omitted its contract/dependencies,
+# and could publish half an incompatible client/server pair.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'geckos-server/src/**'
-      - 'geckos-server/package*.json'
-      - 'geckos-server/tsconfig.json'
-
+  pull_request:
+    paths: ['geckos-server/**', 'package*.json', '.github/workflows/deploy-server.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
-  deploy:
-    runs-on: ubuntu-latest
+  verify:
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: geckos-server/package-lock.json
-
-      - name: Build
-        working-directory: geckos-server
-        run: npm ci && npm run build
-
-      - name: Deploy to VPS
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: root
-          password: ${{ secrets.VPS_PASSWORD }}
-          source: geckos-server/dist/server.js
-          target: /opt/gallax-server/dist/
-          strip_components: 2
-
-      - name: Reload pm2
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: root
-          password: ${{ secrets.VPS_PASSWORD }}
-          script: pm2 reload gallax-server
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: {node-version: '22'}
+      - run: npm ci --prefix geckos-server --no-audit --no-fund
+      - run: npm run build --prefix geckos-server
