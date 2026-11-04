@@ -27,7 +27,7 @@
     "h3-js": "^4.4.0",
     "mapbox-gl": "^3.9.4",
     "pixi.js": "^8.6.6",
-    "twinwire": "2.2.0",
+    "twinwire": "3.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

@@ -127,6 +127,7 @@ export class TwinwireNetworkManager {
     this.channel = createEventClient({
       url:endpoint.href, room:CONTRACT.namespace, latest:CONTRACT.latest, stateMaxAgeMs:500,
       rtc:new URLSearchParams(location.search).get('rtc')==='0'?false:undefined,
+      webtransport:new URLSearchParams(location.search).get('rtc')==='0'?false:undefined,
     });
     this.channel.net.bindPageLifecycle();
     this.channel.onPause = () => { this.connected = false; };

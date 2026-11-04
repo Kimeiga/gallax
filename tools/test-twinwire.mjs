@@ -36,7 +36,7 @@ try{
  assert.equal(a.c.id,id);const init=a.last('init'),player=init.players.find(p=>p.id===id);
  assert.equal(player.lng,lng);assert.equal(player.lat,lat);assert.equal(player.currentHome,building.id);assert.equal(init.buildings[0].ownerId,id);
  await sleep(200);assert.equal(b.all('chat_message').length,1);assert.equal(b.all('chat_message')[0].message,'queued once during reconnect');
- const health=await fetch(base+'/health').then(r=>r.json());assert.equal(health.twinwire,'2.2.0');assert.equal(health.sessions,2);
+ const health=await fetch(base+'/health').then(r=>r.json());assert.equal(health.twinwire,'3.0.0');assert.equal(health.sessions,2);
  console.log(JSON.stringify({ok:true,transport:rtc?'rtc':'ws',movement:true,invalidCoordinatesRejected:true,privateHomeAndOwnershipRetained:true,sameSession:true,queuedChat:'once'}));
 }finally{
  clients.forEach(c=>c.close());if(child.exitCode===null){const ended=once(child,'exit');child.kill();await ended;}
