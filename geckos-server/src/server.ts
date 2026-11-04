@@ -1,4 +1,6 @@
 import { createEventServer, createNativeRtcFactory, type ServerEventChannel as ServerChannel } from 'twinwire/server';
+import { VERSION as WIRE_VERSION } from 'twinwire';
+import twinwirePackage from 'twinwire/package.json' with {type:'json'};
 import type { Json as Data } from 'twinwire';
 import CONTRACT from './contract.json' with {type:'json'};
 import { SnapshotInterpolation } from '@geckos.io/snapshot-interpolation';
@@ -48,7 +50,7 @@ const io = await createEventServer({
   http: (request,response) => {
     if(request.url === '/health'){
       response.writeHead(200,{'content-type':'application/json'});
-      response.end(JSON.stringify({status:'ok',players:players.size,twinwire:'2.2.0',wire:4,sessions:io.game.sessions.size}));
+      response.end(JSON.stringify({status:'ok',players:players.size,twinwire:twinwirePackage.version,wire:WIRE_VERSION,sessions:io.game.sessions.size}));
     }else {response.writeHead(404);response.end('Gallax game server');}
   },
 });
